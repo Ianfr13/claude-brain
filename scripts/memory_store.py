@@ -235,8 +235,8 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
-def _find_similar_learning(conn, error_type: str, error_message: str = None,
-                           solution: str = None, threshold: float = 0.8) -> Optional[Dict]:
+def _find_similar_learning(conn, error_type: str, error_message: Optional[str] = None,
+                           solution: Optional[str] = None, threshold: float = 0.8) -> Optional[Dict]:
     """
     Busca learning similar usando fuzzy matching.
     Retorna o learning mais similar se acima do threshold.
@@ -283,8 +283,8 @@ def _find_similar_learning(conn, error_type: str, error_message: str = None,
 
 # ============ MEMÓRIAS ============
 
-def save_memory(memory_type: str, content: str, category: str = None,
-                metadata: dict = None, importance: int = 5) -> int:
+def save_memory(memory_type: str, content: str, category: Optional[str] = None,
+                metadata: Optional[Dict[str, Any]] = None, importance: int = 5) -> int:
     """Salva uma memória no banco, evitando duplicatas.
 
     Se o conteúdo já existir, incrementa o contador de acesso e retorna o ID existente.
@@ -327,8 +327,8 @@ def save_memory(memory_type: str, content: str, category: str = None,
         return c.lastrowid
 
 
-def search_memories(query: str = None, type: str = None, category: str = None,
-                    min_importance: int = 0, limit: int = 10) -> List[Dict]:
+def search_memories(query: Optional[str] = None, type: Optional[str] = None, category: Optional[str] = None,
+                    min_importance: int = 0, limit: int = 10) -> List[Dict[str, Any]]:
     """Busca memórias por critérios combinados.
 
     Args:
@@ -345,7 +345,7 @@ def search_memories(query: str = None, type: str = None, category: str = None,
         c = conn.cursor()
 
         sql = "SELECT * FROM memories WHERE importance >= ?"
-        params = [min_importance]
+        params: List[Any] = [min_importance]
 
         if type:
             sql += " AND type = ?"
@@ -366,8 +366,8 @@ def search_memories(query: str = None, type: str = None, category: str = None,
 
 # ============ DECISÕES ============
 
-def save_decision(decision: str, reasoning: str = None, project: str = None,
-                  context: str = None, alternatives: str = None,
+def save_decision(decision: str, reasoning: Optional[str] = None, project: Optional[str] = None,
+                  context: Optional[str] = None, alternatives: Optional[str] = None,
                   is_established: bool = False) -> int:
     """Salva uma decisão arquitetural no banco.
 
@@ -397,7 +397,7 @@ def save_decision(decision: str, reasoning: str = None, project: str = None,
         return c.lastrowid
 
 
-def update_decision_outcome(decision_id: int, outcome: str, status: str = None):
+def update_decision_outcome(decision_id: int, outcome: str, status: Optional[str] = None) -> None:
     """Atualiza resultado de uma decisão"""
     with get_db() as conn:
         c = conn.cursor()
@@ -413,7 +413,7 @@ def update_decision_outcome(decision_id: int, outcome: str, status: str = None):
             ''', (outcome, decision_id))
 
 
-def get_decisions(project: str = None, status: str = 'active', limit: int = 10) -> List[Dict]:
+def get_decisions(project: Optional[str] = None, status: str = 'active', limit: int = 10) -> List[Dict[str, Any]]:
     """Busca decisões"""
     with get_db() as conn:
         c = conn.cursor()
@@ -434,9 +434,9 @@ def get_decisions(project: str = None, status: str = 'active', limit: int = 10) 
 
 # ============ APRENDIZADOS ============
 
-def save_learning(error_type: str, solution: str, error_message: str = None,
-                  root_cause: str = None, prevention: str = None, project: str = None,
-                  context: str = None, similarity_threshold: float = 0.8,
+def save_learning(error_type: str, solution: str, error_message: Optional[str] = None,
+                  root_cause: Optional[str] = None, prevention: Optional[str] = None, project: Optional[str] = None,
+                  context: Optional[str] = None, similarity_threshold: float = 0.8,
                   is_established: bool = False) -> int:
     """
     Salva um aprendizado de erro.
@@ -490,8 +490,8 @@ def save_learning(error_type: str, solution: str, error_message: str = None,
         return c.lastrowid
 
 
-def find_solution(error_type: str = None, error_message: str = None,
-                  similarity_threshold: float = 0.6) -> Optional[Dict]:
+def find_solution(error_type: Optional[str] = None, error_message: Optional[str] = None,
+                  similarity_threshold: float = 0.6) -> Optional[Dict[str, Any]]:
     """
     Busca solução para um erro usando fuzzy matching.
 
@@ -558,7 +558,7 @@ def find_solution(error_type: str = None, error_message: str = None,
         return None
 
 
-def get_all_learnings(limit: int = 20) -> List[Dict]:
+def get_all_learnings(limit: int = 20) -> List[Dict[str, Any]]:
     """Lista todos os aprendizados"""
     with get_db() as conn:
         c = conn.cursor()
@@ -571,8 +571,8 @@ def get_all_learnings(limit: int = 20) -> List[Dict]:
 
 # ============ KNOWLEDGE GRAPH ============
 
-def save_entity(name: str, type: str, description: str = None,
-                properties: dict = None) -> int:
+def save_entity(name: str, type: str, description: Optional[str] = None,
+                properties: Optional[Dict[str, Any]] = None) -> int:
     """Salva ou atualiza uma entidade"""
     with get_db() as conn:
         c = conn.cursor()
@@ -589,7 +589,7 @@ def save_entity(name: str, type: str, description: str = None,
 
 
 def save_relation(from_entity: str, to_entity: str, relation_type: str,
-                  weight: float = 1.0, properties: dict = None):
+                  weight: float = 1.0, properties: Optional[Dict[str, Any]] = None) -> None:
     """Salva uma relação entre entidades"""
     # Garante que entidades existem
     with get_db() as conn:
@@ -613,7 +613,7 @@ def save_relation(from_entity: str, to_entity: str, relation_type: str,
               json.dumps(properties) if properties else None))
 
 
-def get_entity(name: str) -> Optional[Dict]:
+def get_entity(name: str) -> Optional[Dict[str, Any]]:
     """Busca uma entidade"""
     with get_db() as conn:
         c = conn.cursor()
@@ -622,7 +622,7 @@ def get_entity(name: str) -> Optional[Dict]:
         return dict(row) if row else None
 
 
-def get_entity_graph(name: str) -> Optional[Dict]:
+def get_entity_graph(name: str) -> Optional[Dict[str, Any]]:
     """Retorna grafo completo de uma entidade"""
     entity = get_entity(name)
     if not entity:
@@ -656,7 +656,7 @@ def get_entity_graph(name: str) -> Optional[Dict]:
     }
 
 
-def get_related_entities(name: str, relation_type: str = None, depth: int = 1) -> List[Dict]:
+def get_related_entities(name: str, relation_type: Optional[str] = None, depth: int = 1) -> List[Dict[str, Any]]:
     """Busca entidades relacionadas (com profundidade)
 
     Refatorado: Usa conexão única para evitar N+1 queries
@@ -701,7 +701,7 @@ def get_related_entities(name: str, relation_type: str = None, depth: int = 1) -
 
 # ============ PREFERÊNCIAS ============
 
-def save_preference(key: str, value: str, confidence: float = 0.5, source: str = None):
+def save_preference(key: str, value: str, confidence: float = 0.5, source: Optional[str] = None) -> None:
     """Salva ou atualiza uma preferência"""
     with get_db() as conn:
         c = conn.cursor()
@@ -739,7 +739,7 @@ def get_all_preferences(min_confidence: float = 0.3) -> Dict[str, str]:
 
 # ============ PADRÕES DE CÓDIGO ============
 
-def save_pattern(name: str, code: str, pattern_type: str = None, language: str = None):
+def save_pattern(name: str, code: str, pattern_type: Optional[str] = None, language: Optional[str] = None) -> None:
     """Salva um padrão de código"""
     with get_db() as conn:
         c = conn.cursor()
@@ -774,7 +774,7 @@ def increment_pattern_usage(name: str) -> bool:
         return c.rowcount > 0
 
 
-def get_all_entities(type: str = None, limit: int = 100) -> List[Dict]:
+def get_all_entities(type: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
     """Lista todas as entidades"""
     with get_db() as conn:
         c = conn.cursor()
@@ -802,7 +802,7 @@ def get_all_entities(type: str = None, limit: int = 100) -> List[Dict]:
         return entities
 
 
-def get_all_patterns(pattern_type: str = None, limit: int = 100) -> List[Dict]:
+def get_all_patterns(pattern_type: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
     """Lista todos os padrões"""
     with get_db() as conn:
         c = conn.cursor()
@@ -823,9 +823,9 @@ def get_all_patterns(pattern_type: str = None, limit: int = 100) -> List[Dict]:
 
 # ============ SESSÕES ============
 
-def save_session(session_id: str, project: str = None, summary: str = None,
-                 key_decisions: list = None, files_modified: list = None,
-                 duration_minutes: int = None):
+def save_session(session_id: str, project: Optional[str] = None, summary: Optional[str] = None,
+                 key_decisions: Optional[List[Dict[str, Any]]] = None, files_modified: Optional[List[str]] = None,
+                 duration_minutes: Optional[int] = None) -> None:
     """Salva resumo de uma sessão"""
     with get_db() as conn:
         c = conn.cursor()
@@ -843,7 +843,7 @@ def save_session(session_id: str, project: str = None, summary: str = None,
               duration_minutes))
 
 
-def get_recent_sessions(project: str = None, limit: int = 5) -> List[Dict]:
+def get_recent_sessions(project: Optional[str] = None, limit: int = 5) -> List[Dict[str, Any]]:
     """Busca sessões recentes"""
     with get_db() as conn:
         c = conn.cursor()
@@ -863,7 +863,7 @@ def get_recent_sessions(project: str = None, limit: int = 5) -> List[Dict]:
 
 # ============ EXPORT ============
 
-def export_context(project: str = None, include_learnings: bool = True) -> str:
+def export_context(project: Optional[str] = None, include_learnings: bool = True) -> str:
     """Exporta contexto formatado para Claude"""
     output = ["# Contexto da Memória\n"]
 
@@ -911,7 +911,7 @@ def export_context(project: str = None, include_learnings: bool = True) -> str:
     return "\n".join(output)
 
 
-def get_stats() -> Dict:
+def get_stats() -> Dict[str, Any]:
     """Retorna estatísticas do banco"""
     with get_db() as conn:
         c = conn.cursor()
@@ -1005,8 +1005,8 @@ def record_usage(table: str, record_id: int, was_useful: bool = True) -> float:
         return new_score
 
 
-def contradict_knowledge(table: str, record_id: int, reason: str = None,
-                         replacement_id: int = None) -> None:
+def contradict_knowledge(table: str, record_id: int, reason: Optional[str] = None,
+                         replacement_id: Optional[int] = None) -> None:
     """
     Marca um conhecimento como contradito/incorreto.
     Opcionalmente aponta para o conhecimento que o substitui.
@@ -1044,9 +1044,9 @@ def confirm_knowledge(table: str, record_id: int) -> float:
     return record_usage(table, record_id, was_useful=True)
 
 
-def get_knowledge_by_maturity(table: str, status: str = None,
+def get_knowledge_by_maturity(table: str, status: Optional[str] = None,
                                min_confidence: float = 0.0,
-                               limit: int = 20) -> List[Dict]:
+                               limit: int = 20) -> List[Dict[str, Any]]:
     """
     Busca conhecimentos por status de maturidade.
     """
@@ -1069,7 +1069,7 @@ def get_knowledge_by_maturity(table: str, status: str = None,
             FROM {table}
             WHERE confidence_score >= ?
         '''
-        params = [min_confidence]
+        params: List[Any] = [min_confidence]
 
         if status:
             sql += ' AND maturity_status = ?'
@@ -1082,7 +1082,7 @@ def get_knowledge_by_maturity(table: str, status: str = None,
         return [dict(row) for row in c.fetchall()]
 
 
-def get_hypotheses(table: str = None, limit: int = 10) -> List[Dict]:
+def get_hypotheses(table: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
     """
     Retorna conhecimentos que ainda são hipóteses (não confirmados).
     Útil para revisão periódica.
@@ -1127,7 +1127,7 @@ def get_hypotheses(table: str = None, limit: int = 10) -> List[Dict]:
     return sorted(results, key=lambda x: x.get('confidence_score', 0))[:limit]
 
 
-def get_contradicted(limit: int = 10) -> List[Dict]:
+def get_contradicted(limit: int = 10) -> List[Dict[str, Any]]:
     """
     Retorna conhecimentos que foram contraditos.
     Útil para auditoria e limpeza.
@@ -1166,7 +1166,7 @@ def get_contradicted(limit: int = 10) -> List[Dict]:
 
 
 def supersede_knowledge(table: str, old_id: int, new_content: str,
-                        reason: str = None, **kwargs) -> int:
+                        reason: Optional[str] = None, **kwargs: Any) -> int:
     """
     Substitui um conhecimento antigo por um novo.
     Marca o antigo como deprecated e cria o novo.
@@ -1208,7 +1208,7 @@ def delete_record(table: str, record_id: int) -> bool:
         return deleted
 
 
-def delete_by_search(query: str, table: str = None, dry_run: bool = True) -> List[Dict]:
+def delete_by_search(query: str, table: Optional[str] = None, dry_run: bool = True) -> List[Dict[str, Any]]:
     """
     Encontra registros por busca LIKE e opcionalmente deleta.
     dry_run=True apenas retorna o que seria deletado.

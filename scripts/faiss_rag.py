@@ -297,20 +297,6 @@ def load_faiss_index(auto_rebuild: bool = True):
     if _faiss_index is not None:
         return _faiss_index, _faiss_metadata
 
-    # Security: Migração segura pkl → json (one-time)
-    old_pkl = FAISS_DIR / "metadata.pkl"
-    if old_pkl.exists():
-        if not FAISS_META_FILE.exists():
-            import pickle
-            logger.info("Migrando metadata.pkl → metadata.json (segurança)")
-            with open(old_pkl, 'rb') as f:
-                data = pickle.load(f)
-            with open(FAISS_META_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False)
-        # Renomeia arquivo antigo para backup
-        old_pkl.rename(old_pkl.with_suffix('.pkl.migrated'))
-        logger.info("Arquivo pkl migrado e renomeado para .pkl.migrated")
-
     if FAISS_INDEX_FILE.exists() and FAISS_META_FILE.exists():
         import faiss
         _faiss_index = faiss.read_index(str(FAISS_INDEX_FILE))

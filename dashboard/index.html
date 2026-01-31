@@ -157,7 +157,9 @@
                 </h2>
 
                 <div class="flex gap-3 mb-4">
+                    <label for="search-input" class="sr-only">Buscar no brain</label>
                     <input type="text"
+                           id="search-input"
                            x-model="searchQuery"
                            @keyup.enter="performSearch()"
                            placeholder="Buscar no brain..."
@@ -423,7 +425,9 @@
 
                 <!-- Entity Input -->
                 <div class="flex gap-2">
+                    <label for="entity-input" class="sr-only">Buscar entidade no knowledge graph</label>
                     <input type="text"
+                           id="entity-input"
                            x-model="entityQuery"
                            @keyup.enter="fetchEntityGraph()"
                            placeholder="Buscar entidade..."

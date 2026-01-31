@@ -847,10 +847,11 @@ def mock_rag_engine():
             result = brain_cli_runner(['search', 'python'])
             assert 'Test content' in result['stdout']
     """
-    with patch('brain_cli.index_file') as mock_index_file, \
-         patch('brain_cli.index_directory') as mock_index_dir, \
-         patch('brain_cli.search') as mock_search, \
-         patch('brain_cli.get_context_for_query') as mock_context:
+    # Patching nos novos modulos cli/rag.py refatorados
+    with patch('scripts.cli.rag.index_file') as mock_index_file, \
+         patch('scripts.cli.rag.index_directory') as mock_index_dir, \
+         patch('scripts.cli.rag.search') as mock_search, \
+         patch('scripts.cli.rag.get_context_for_query') as mock_context:
 
         mock_index_file.return_value = {'chunk_count': 5}
         mock_index_dir.return_value = 10
@@ -877,10 +878,21 @@ def mock_metrics():
             result = brain_cli_runner(['useful'])
             mock_metrics['mark_useful'].assert_called_once()
     """
-    with patch('brain_cli.log_action') as mock_log, \
-         patch('brain_cli.mark_useful') as mock_useful, \
-         patch('brain_cli.get_effectiveness') as mock_eff, \
-         patch('brain_cli.print_dashboard') as mock_dash:
+    # Patching nos novos modulos cli/ refatorados
+    with patch('scripts.cli.decisions.log_action') as mock_log_decisions, \
+         patch('scripts.cli.learnings.log_action') as mock_log_learnings, \
+         patch('scripts.cli.rag.log_action') as mock_log_rag, \
+         patch('scripts.cli.utils.log_action') as mock_log_utils, \
+         patch('scripts.cli.utils.mark_useful') as mock_useful, \
+         patch('scripts.cli.utils.get_effectiveness') as mock_eff, \
+         patch('scripts.cli.utils.print_dashboard') as mock_dash:
+
+        # Cria um mock unificado para log_action
+        mock_log = MagicMock()
+        mock_log_decisions.side_effect = mock_log
+        mock_log_learnings.side_effect = mock_log
+        mock_log_rag.side_effect = mock_log
+        mock_log_utils.side_effect = mock_log
 
         mock_eff.return_value = {
             'total_actions': 100,

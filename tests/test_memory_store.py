@@ -12,8 +12,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import pytest
 from memory_store import (
     save_memory, search_memories, save_decision, get_decisions,
-    save_learning, get_all_learnings, _hash, _escape_like, _similarity
+    save_learning, get_all_learnings
 )
+# Funcoes utilitarias movidas para scripts/memory/base.py
+from scripts.memory.base import _hash, _escape_like, _similarity
 
 
 class TestHashFunctions:

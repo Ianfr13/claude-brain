@@ -21,30 +21,33 @@ import pytest
 # Adiciona scripts ao path
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-# Importa modulos a testar
-from brain_cli import (
-    # Funcoes de output
+# Importa modulos a testar - usando os novos submodulos cli/
+from scripts.cli import (
+    # Funcoes de output (de base.py)
     Colors, c, print_header, print_success, print_error, print_info,
-    # Comandos de memoria
-    cmd_remember, cmd_decide, cmd_learn, cmd_solve, cmd_recall,
-    cmd_decisions, cmd_learnings,
-    # Comandos de RAG
+    # Path helpers (de base.py)
+    is_path_allowed, ALLOWED_INDEX_PATHS,
+    # Comandos de memoria (de memory.py)
+    cmd_remember, cmd_recall,
+    # Comandos de decisoes (de decisions.py)
+    cmd_decide, cmd_decisions, cmd_confirm, cmd_contradict,
+    # Comandos de learnings (de learnings.py)
+    cmd_learn, cmd_solve, cmd_learnings,
+    # Comandos de RAG (de rag.py)
     cmd_index, cmd_search, cmd_context, cmd_ask, cmd_related,
-    # Knowledge Graph
+    # Knowledge Graph (de graph.py)
     cmd_entity, cmd_relate, cmd_graph,
-    # Preferencias
-    cmd_prefer, cmd_prefs,
-    # Padroes
-    cmd_pattern, cmd_snippet,
-    # Utilidades
-    cmd_export, cmd_stats, cmd_useful, cmd_useless, cmd_help,
-    # Maturacao
-    cmd_hypotheses, cmd_confirm, cmd_contradict, cmd_supersede, cmd_maturity,
-    # Delete
-    cmd_delete, cmd_forget,
-    # Main e auxiliares
-    main, _is_path_allowed, ALLOWED_INDEX_PATHS
+    # Preferencias (de preferences.py)
+    cmd_prefer, cmd_prefs, cmd_pattern, cmd_snippet,
+    # Maturacao (de maturity.py)
+    cmd_hypotheses, cmd_supersede, cmd_maturity,
+    # Utilidades (de utils.py)
+    cmd_export, cmd_stats, cmd_useful, cmd_useless, cmd_help, cmd_delete, cmd_forget,
 )
+from brain_cli import main
+
+# Alias para compatibilidade com testes existentes
+_is_path_allowed = is_path_allowed
 
 
 # ============ TESTES DE FORMATACAO DE OUTPUT ============
@@ -330,7 +333,7 @@ class TestCmdLearn:
         )
         # Mock save_learning pois a funcao tem bug com coluna 'context'
         with mock_isatty(False), \
-             patch('brain_cli.save_learning', return_value=42) as mock_save:
+             patch('scripts.cli.learnings.save_learning', return_value=42) as mock_save:
             cmd_learn(args)
             captured = capsys.readouterr()
             assert "salva" in captured.out.lower() or "ID:" in captured.out
@@ -345,7 +348,7 @@ class TestCmdLearn:
         )
         # Mock save_learning pois a funcao tem bug com coluna 'context'
         with mock_isatty(False), \
-             patch('brain_cli.save_learning', return_value=99) as mock_save:
+             patch('scripts.cli.learnings.save_learning', return_value=99) as mock_save:
             cmd_learn(args)
             captured = capsys.readouterr()
             assert "confirmad" in captured.out.lower()
@@ -749,7 +752,7 @@ class TestCmdMaturity:
         args = cli_args()
         with mock_isatty(False):
             # Mock get_knowledge_by_maturity para evitar erro de coluna em memories
-            with patch('brain_cli.get_knowledge_by_maturity') as mock_get:
+            with patch('scripts.cli.maturity.get_knowledge_by_maturity') as mock_get:
                 mock_get.return_value = [{'maturity_status': 'hypothesis', 'id': 1}]
                 cmd_maturity(args)
                 captured = capsys.readouterr()
@@ -838,7 +841,7 @@ class TestCmdStats:
         args = cli_args()
         with mock_isatty(False):
             # Mock rag_stats que pode nao existir
-            with patch('brain_cli.rag_stats', return_value={'documents': 10, 'chunks': 100}):
+            with patch('scripts.cli.utils.rag_stats', return_value={'documents': 10, 'chunks': 100}):
                 cmd_stats(args)
                 captured = capsys.readouterr()
                 assert "Estatísticas" in captured.out or "Memória" in captured.out
@@ -894,16 +897,18 @@ class TestErrorHandling:
 
     def test_main_catches_keyboard_interrupt(self, capsys):
         """main() trata KeyboardInterrupt"""
+        # O patch deve ser no namespace do brain_cli onde cmd_stats foi importado
         with patch('sys.argv', ['brain', 'stats']), \
-             patch('brain_cli.cmd_stats', side_effect=KeyboardInterrupt):
+             patch.object(__import__('brain_cli', fromlist=['cmd_stats']), 'cmd_stats', side_effect=KeyboardInterrupt):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 130
 
     def test_main_catches_generic_exception(self, capsys, mock_isatty):
         """main() trata excecoes genericas"""
+        # O patch deve ser no namespace do brain_cli onde cmd_stats foi importado
         with patch('sys.argv', ['brain', 'stats']), \
-             patch('brain_cli.cmd_stats', side_effect=Exception("Test error")), \
+             patch.object(__import__('brain_cli', fromlist=['cmd_stats']), 'cmd_stats', side_effect=Exception("Test error")), \
              mock_isatty(False):
             with pytest.raises(SystemExit) as exc_info:
                 main()

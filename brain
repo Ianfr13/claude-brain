@@ -9,6 +9,9 @@ VENV="$BRAIN_DIR/.venv/bin/activate"
 export HF_HUB_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 
+# Adiciona diretorio ao PYTHONPATH para imports funcionarem
+export PYTHONPATH="$BRAIN_DIR:$PYTHONPATH"
+
 if [ -f "$VENV" ]; then
     source "$VENV"
 fi

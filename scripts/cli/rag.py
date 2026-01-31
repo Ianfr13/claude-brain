@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""
+Claude Brain CLI - Modulo RAG
+
+Comandos de busca semantica e indexacao:
+- cmd_index: Indexa arquivo/diretorio
+- cmd_search: Busca semantica
+- cmd_context: Retorna contexto para Claude
+- cmd_ask: Consulta inteligente combinada
+- cmd_related: Encontra documentos relacionados
+"""
+
+from pathlib import Path
+
+from .base import (
+    Colors, c, print_header, print_success, print_error, print_info,
+    ALLOWED_INDEX_PATHS, is_path_allowed
+)
+from scripts.rag_engine import (
+    index_file, index_directory,
+    search as simple_search,
+    get_context_for_query as simple_context
+)
+from scripts.memory_store import get_decisions, find_solution
+from scripts.metrics import log_action
+
+# Tenta usar FAISS para busca semantica
+try:
+    from scripts.faiss_rag import (
+        semantic_search,
+        get_context_for_query as faiss_context
+    )
+    HAS_FAISS = True
+except ImportError:
+    HAS_FAISS = False
+
+
+def search(query, doc_type=None, limit=5):
+    """Busca hibrida: FAISS se disponivel, senao simples"""
+    if HAS_FAISS:
+        return semantic_search(query, doc_type, limit)
+    return simple_search(query, doc_type, limit)
+
+
+def get_context_for_query(query, max_tokens=2000):
+    """Contexto hibrido"""
+    if HAS_FAISS:
+        return faiss_context(query, max_tokens)
+    return simple_context(query, max_tokens)
+
+
+def cmd_index(args):
+    """Indexa arquivo ou diretorio para busca semantica.
+
+    Processa arquivos de texto/codigo e cria embeddings para
+    permitir busca semantica posterior via brain search.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - path (list[str]): Caminho do arquivo ou diretorio
+            - no_recursive (bool): Nao indexar subdiretorios
+
+    Returns:
+        None. Imprime progresso e total de chunks indexados.
+
+    Examples:
+        $ brain index /root/meu-projeto
+        i Indexando diretorio: /root/meu-projeto
+        * Indexados: 42 arquivos
+
+        $ brain index README.md
+        i Indexando arquivo: README.md
+        * Indexado: 5 chunks
+
+    Notes:
+        Apenas paths permitidos podem ser indexados (seguranca).
+    """
+    if not args.path:
+        print_error("Uso: brain index <arquivo|diretorio>")
+        return
+
+    path = Path(args.path[0])
+
+    # Validacao de seguranca contra path traversal
+    if not is_path_allowed(path):
+        print_error(f"Path nao permitido: {path}")
+        print_info("Diretorios permitidos:")
+        for allowed in ALLOWED_INDEX_PATHS:
+            print(f"  - {allowed}")
+        return
+
+    if path.is_file():
+        print_info(f"Indexando arquivo: {path}")
+        result = index_file(str(path))
+        if result:
+            chunks = result.get('chunk_count', result.get('chunks', '?'))
+            print_success(f"Indexado: {chunks} chunks")
+        else:
+            print_error("Falha ao indexar arquivo")
+
+    elif path.is_dir():
+        print_info(f"Indexando diretorio: {path}")
+        print()
+        count = index_directory(str(path), recursive=not args.no_recursive)
+        print()
+        print_success(f"Indexados: {count} arquivos")
+
+    else:
+        print_error(f"Nao encontrado: {path}")
+
+
+def cmd_search(args):
+    """Busca semantica nos documentos indexados.
+
+    Usa embeddings e FAISS para encontrar documentos semanticamente
+    similares a query, independente de palavras-chave exatas.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - query (list[str]): Texto da busca
+            - type (str, optional): Filtrar por tipo de documento
+            - limit (int, optional): Limite de resultados (default: 5)
+
+    Returns:
+        None. Imprime resultados com score de similaridade.
+
+    Examples:
+        $ brain search "como configurar autenticacao"
+        Resultados para: 'como configurar autenticacao'
+        [0.85] auth/README.md
+          Configure o JWT secret em .env...
+
+        $ brain search "deploy docker" -l 10
+        ...
+    """
+    if not args.query:
+        print_error("Uso: brain search <query>")
+        return
+
+    query = " ".join(args.query)
+    results = search(query, doc_type=args.type, limit=args.limit or 5)
+
+    # Log da acao
+    top_score = results[0]['score'] if results else None
+    log_action("search", query=query, results_count=len(results), top_score=top_score)
+
+    if not results:
+        print_info("Nenhum resultado encontrado.")
+        return
+
+    print_header(f"Resultados para: '{query}'")
+    for r in results:
+        score = r.get('score', 0)
+        score_str = f"{score:.2f}" if isinstance(score, float) else str(score)
+        score_color = Colors.GREEN if score > 0.7 else Colors.YELLOW if score > 0.4 else Colors.DIM
+        print(f"\n{c(f'[{score_str}]', score_color)} {c(r['source'], Colors.CYAN)}")
+        print(f"  {r['text'][:200]}...")
+
+    print(c(f"\nFoi util? brain useful | brain useless", Colors.DIM))
+
+
+def cmd_context(args):
+    """Retorna contexto formatado para injecao no Claude.
+
+    Busca e formata contexto relevante para ser usado
+    como input adicional em conversas com o Claude.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - query (list[str]): Texto da busca
+            - tokens (int, optional): Limite de tokens (default: 2000)
+
+    Returns:
+        None. Imprime contexto formatado ou mensagem de vazio.
+
+    Examples:
+        $ brain context "deploy kubernetes"
+        # Contexto relevante:
+        ...documentos sobre kubernetes...
+
+        $ brain context "api rest" --tokens 1000
+        ...
+    """
+    if not args.query:
+        print_error("Uso: brain context <query>")
+        return
+
+    query = " ".join(args.query)
+    context = get_context_for_query(query, max_tokens=args.tokens or 2000)
+
+    if context:
+        print(context)
+    else:
+        print_info("Nenhum contexto relevante encontrado.")
+
+
+def cmd_ask(args):
+    """Consulta inteligente que combina todas as fontes.
+
+    Busca em learnings, decisoes e documentos para fornecer
+    a melhor resposta possivel para a duvida do usuario.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - query (list[str]): Pergunta ou duvida
+
+    Returns:
+        None. Imprime resultados de todas as fontes relevantes.
+
+    Examples:
+        $ brain ask "como resolver ModuleNotFoundError"
+        SOLUCAO CONHECIDA: * 85%
+           Erro: ModuleNotFoundError
+           Solucao: pip install <pacote>
+
+        DECISOES RELACIONADAS:
+           o 50% Usar venv para isolar dependencias
+
+        $ brain ask "qual banco de dados usar"
+        ...
+    """
+    if not args.query:
+        print_error("Uso: brain ask <pergunta>")
+        return
+
+    query = " ".join(args.query)
+    found_anything = False
+
+    # 1. Busca em learnings (erros/solucoes)
+    solution = find_solution(error_type=query, error_message=query, similarity_threshold=0.4)
+    if solution:
+        found_anything = True
+        confidence = solution.get('confidence_score', 0.5) or 0.5
+        status_icon = "*" if solution.get('maturity_status') == 'confirmed' else "o"
+        print(f"\n{c('SOLUCAO CONHECIDA:', Colors.GREEN)} {status_icon} {confidence*100:.0f}%")
+        print(f"   Erro: {solution['error_type']}")
+        print(f"   Solucao: {solution['solution']}")
+        if solution.get('context'):
+            print(f"   Contexto: {solution['context']}")
+        if solution.get('prevention'):
+            print(f"   Prevencao: {solution['prevention']}")
+
+    # 2. Busca em decisoes
+    decisions = get_decisions(limit=50)
+    relevant_decisions = []
+    query_words = set(query.lower().split())
+    for d in decisions:
+        text = f"{d['decision']} {d.get('reasoning', '')} {d.get('project', '')}".lower()
+        if any(word in text for word in query_words if len(word) > 3):
+            relevant_decisions.append(d)
+
+    if relevant_decisions[:3]:
+        found_anything = True
+        print(f"\n{c('DECISOES RELACIONADAS:', Colors.CYAN)}")
+        for d in relevant_decisions[:3]:
+            conf = d.get('confidence_score', 0.5) or 0.5
+            status = "*" if d.get('maturity_status') == 'confirmed' else "o"
+            proj = f"[{d['project']}] " if d.get('project') else ""
+            print(f"   {status} {conf*100:.0f}% {proj}{d['decision'][:70]}")
+
+    # 3. Busca semantica nos docs (apenas se nao encontrou nada especifico)
+    if not found_anything:
+        results = search(query, limit=3)
+        if results:
+            found_anything = True
+            print(f"\n{c('DOCUMENTOS RELEVANTES:', Colors.YELLOW)}")
+            for r in results[:3]:
+                score = r.get('score', 0)
+                print(f"   [{score:.1f}] {r['source']}")
+                print(f"        {r['text'][:100]}...")
+
+    if not found_anything:
+        print(c("\nNada encontrado no brain para essa query.", Colors.RED))
+        print(c("   Apos resolver, salve com: brain learn/decide", Colors.DIM))
+    else:
+        print(c(f"\nUtil? brain useful | Errado? brain contradict <table> <id>", Colors.DIM))
+
+
+def cmd_related(args):
+    """Encontra documentos relacionados por similaridade.
+
+    Busca documentos semanticamente similares ao arquivo
+    especificado, util para descobrir dependencias.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - source (list[str]): Caminho do arquivo fonte
+            - limit (int, optional): Limite de resultados (default: 5)
+
+    Returns:
+        None. Imprime lista de documentos relacionados com score.
+
+    Examples:
+        $ brain related auth/login.py
+        Documentos relacionados a: auth/login.py
+          [0.82] auth/jwt.py
+          [0.75] tests/test_auth.py
+          [0.68] docs/AUTH.md
+    """
+    if not args.source:
+        print_error("Uso: brain related <arquivo>")
+        return
+
+    source = args.source[0]
+    # Busca documentos similares usando o nome do arquivo como query
+    filename = Path(source).stem
+    results = search(filename, limit=args.limit or 5)
+
+    if not results:
+        print_info("Nenhum documento relacionado encontrado.")
+        return
+
+    print_header(f"Documentos relacionados a: {source}")
+    for r in results:
+        if r['source'] != source:  # Exclui o proprio arquivo
+            score = r.get('score', 0)
+            score_str = f"{score:.2f}" if isinstance(score, float) else str(score)
+            print(f"  [{score_str}] {r['source']}")

@@ -53,19 +53,205 @@ _model = None
 _faiss_index = None
 _faiss_metadata = None
 CACHE_MAX_SIZE = 100
-CACHE_FILE = RAG_DIR / "query_cache.json"
+CACHE_FILE = RAG_DIR / "query_cache.json"  # Legacy fallback
+CACHE_DIR = RAG_DIR / "diskcache"
 CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 horas
 
+# Cache backend: "redis", "diskcache", or "json" (legacy)
+_cache_backend = None
+_cache_instance = None
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+REDIS_PREFIX = "brain:query:"
 
-def load_query_cache() -> dict:
-    """Carrega cache de queries do disco, removendo entradas expiradas.
 
-    Formato do cache:
-    - Novo formato (com TTL): {"key": {"data": [...], "timestamp": 1234567890}}
-    - Formato antigo (sem TTL): {"key": [...]}
+def _init_cache_backend():
+    """Inicializa o backend de cache (Redis > diskcache > JSON).
 
-    Entradas no formato antigo sao convertidas automaticamente.
+    Tenta Redis primeiro, depois diskcache, e por ultimo JSON como fallback.
     """
+    global _cache_backend, _cache_instance
+
+    if _cache_backend is not None:
+        return _cache_backend, _cache_instance
+
+    # Tenta Redis primeiro
+    try:
+        import redis
+        r = redis.from_url(REDIS_URL, decode_responses=True)
+        r.ping()
+        _cache_backend = "redis"
+        _cache_instance = r
+        logger.info("Cache backend: Redis")
+        return _cache_backend, _cache_instance
+    except Exception as e:
+        logger.debug(f"Redis nao disponivel: {e}")
+
+    # Tenta diskcache (SQLite-backed)
+    try:
+        import diskcache
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache = diskcache.Cache(
+            str(CACHE_DIR),
+            size_limit=50 * 1024 * 1024,  # 50MB max
+            eviction_policy="least-recently-used",
+        )
+        _cache_backend = "diskcache"
+        _cache_instance = cache
+        logger.info("Cache backend: diskcache (SQLite)")
+        return _cache_backend, _cache_instance
+    except Exception as e:
+        logger.warning(f"diskcache nao disponivel: {e}")
+
+    # Fallback para JSON (legado)
+    _cache_backend = "json"
+    _cache_instance = None
+    logger.warning("Cache backend: JSON (fallback, performance reduzida)")
+    return _cache_backend, _cache_instance
+
+
+def cache_get(key: str) -> Optional[dict]:
+    """Obtem valor do cache.
+
+    Args:
+        key: Chave de cache (query:doc_type:limit)
+
+    Returns:
+        Dict com resultados ou None se nao encontrado/expirado
+    """
+    backend, instance = _init_cache_backend()
+
+    try:
+        if backend == "redis":
+            data = instance.get(f"{REDIS_PREFIX}{key}")
+            if data:
+                return json.loads(data)
+            return None
+
+        elif backend == "diskcache":
+            result = instance.get(key)
+            return result  # diskcache retorna None se expirado
+
+        else:  # json fallback
+            cache = _load_json_cache()
+            if key in cache:
+                entry = cache[key]
+                if isinstance(entry, dict) and "data" in entry and "timestamp" in entry:
+                    if time.time() - entry["timestamp"] < CACHE_TTL_SECONDS:
+                        return entry["data"]
+            return None
+
+    except Exception as e:
+        logger.warning(f"Erro ao ler cache ({backend}): {e}")
+        return None
+
+
+def cache_set(key: str, value: dict) -> bool:
+    """Armazena valor no cache.
+
+    Args:
+        key: Chave de cache
+        value: Dados a armazenar (lista de resultados)
+
+    Returns:
+        True se sucesso, False caso contrario
+    """
+    backend, instance = _init_cache_backend()
+
+    try:
+        if backend == "redis":
+            instance.setex(
+                f"{REDIS_PREFIX}{key}",
+                CACHE_TTL_SECONDS,
+                json.dumps(value, ensure_ascii=False)
+            )
+            return True
+
+        elif backend == "diskcache":
+            instance.set(key, value, expire=CACHE_TTL_SECONDS)
+            return True
+
+        else:  # json fallback
+            cache = _load_json_cache()
+            cache[key] = {"data": value, "timestamp": time.time()}
+            _save_json_cache(cache)
+            return True
+
+    except Exception as e:
+        logger.warning(f"Erro ao escrever cache ({backend}): {e}")
+        return False
+
+
+def cache_clear() -> bool:
+    """Limpa todo o cache.
+
+    Returns:
+        True se sucesso, False caso contrario
+    """
+    backend, instance = _init_cache_backend()
+
+    try:
+        if backend == "redis":
+            keys = instance.keys(f"{REDIS_PREFIX}*")
+            if keys:
+                instance.delete(*keys)
+            logger.info("Cache Redis limpo")
+            return True
+
+        elif backend == "diskcache":
+            instance.clear()
+            logger.info("Cache diskcache limpo")
+            return True
+
+        else:  # json fallback
+            if CACHE_FILE.exists():
+                CACHE_FILE.unlink()
+            logger.info("Cache JSON limpo")
+            return True
+
+    except Exception as e:
+        logger.warning(f"Erro ao limpar cache ({backend}): {e}")
+        return False
+
+
+def cache_stats() -> dict:
+    """Retorna estatisticas do cache.
+
+    Returns:
+        Dict com estatisticas do cache
+    """
+    backend, instance = _init_cache_backend()
+
+    try:
+        if backend == "redis":
+            keys = instance.keys(f"{REDIS_PREFIX}*")
+            return {
+                "backend": "redis",
+                "entries": len(keys),
+                "url": REDIS_URL.split("@")[-1] if "@" in REDIS_URL else REDIS_URL,
+            }
+
+        elif backend == "diskcache":
+            return {
+                "backend": "diskcache",
+                "entries": len(instance),
+                "size_bytes": instance.volume(),
+                "path": str(CACHE_DIR),
+            }
+
+        else:  # json fallback
+            cache = _load_json_cache()
+            return {
+                "backend": "json",
+                "entries": len(cache),
+                "path": str(CACHE_FILE),
+            }
+
+    except Exception as e:
+        return {"backend": backend, "error": str(e)}
+
+
+def _load_json_cache() -> dict:
+    """Carrega cache JSON legado."""
     if CACHE_FILE.exists():
         try:
             cache = json.loads(CACHE_FILE.read_text())
@@ -73,40 +259,28 @@ def load_query_cache() -> dict:
             cleaned_cache = {}
 
             for key, value in cache.items():
-                # Compatibilidade: formato antigo (lista direta) -> converte para novo formato
                 if isinstance(value, list):
-                    # Entrada antiga sem timestamp - considera como recem criada
                     cleaned_cache[key] = {"data": value, "timestamp": current_time}
                 elif isinstance(value, dict) and "data" in value and "timestamp" in value:
-                    # Formato novo - verifica TTL
                     if current_time - value["timestamp"] < CACHE_TTL_SECONDS:
                         cleaned_cache[key] = value
-                    # Entrada expirada - nao inclui no cache limpo
 
             return cleaned_cache
         except (json.JSONDecodeError, IOError) as e:
-            logger.warning(f"Erro ao carregar cache: {e}")
+            logger.warning(f"Erro ao carregar cache JSON: {e}")
     return {}
 
 
-def save_query_cache(cache: dict):
-    """Salva cache de queries no disco.
-
-    O cache usa formato com TTL: {"key": {"data": [...], "timestamp": 1234567890}}
-    Limita tamanho removendo entradas mais antigas primeiro.
-    """
-    # Limita tamanho - remove as mais antigas primeiro
+def _save_json_cache(cache: dict):
+    """Salva cache JSON legado."""
     if len(cache) > CACHE_MAX_SIZE:
-        # Ordena por timestamp (mais antigos primeiro)
         sorted_keys = sorted(
             cache.keys(),
             key=lambda k: cache[k].get("timestamp", 0) if isinstance(cache[k], dict) else 0
         )
-        # Remove entradas mais antigas
         for k in sorted_keys[:len(cache) - CACHE_MAX_SIZE]:
             del cache[k]
 
-    # Escrita atômica com file locking para evitar race condition
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
@@ -115,14 +289,26 @@ def save_query_cache(cache: dict):
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
+# Funcoes de compatibilidade (deprecated, usar cache_* diretamente)
+def load_query_cache() -> dict:
+    """DEPRECATED: Use cache_get() diretamente.
+
+    Mantido para compatibilidade com codigo legado.
+    """
+    return _load_json_cache()
+
+
+def save_query_cache(cache: dict):
+    """DEPRECATED: Use cache_set() diretamente.
+
+    Mantido para compatibilidade com codigo legado.
+    """
+    _save_json_cache(cache)
+
+
 def invalidate_query_cache():
-    """Invalida o cache de queries (chamado após rebuild)."""
-    if CACHE_FILE.exists():
-        try:
-            CACHE_FILE.unlink()
-            logger.info("Cache de queries invalidado após rebuild")
-        except Exception as e:
-            logger.warning(f"Erro ao invalidar cache: {e}")
+    """Invalida o cache de queries (chamado apos rebuild)."""
+    cache_clear()
 
 
 def get_model():
@@ -444,26 +630,29 @@ def build_faiss_index(force: bool = False, log_rebuild: bool = False) -> Dict:
 
 
 def semantic_search(query: str, doc_type: str = None, limit: int = TOP_K, auto_rebuild: bool = True) -> List[Dict]:
-    """Busca semântica usando FAISS com cache persistente.
+    """Busca semantica usando FAISS com cache persistente (Redis/diskcache).
 
     Args:
         query: Termo de busca
         doc_type: Filtrar por tipo de documento (markdown, python, etc)
-        limit: Número máximo de resultados (default: TOP_K=5)
-        auto_rebuild: Se True, verifica e reconstrói índice se necessário
+        limit: Numero maximo de resultados (default: TOP_K=5)
+        auto_rebuild: Se True, verifica e reconstroi indice se necessario
 
     Returns:
         Lista de dicts com keys: score, text, source, doc_type
+
+    Performance:
+        - Cache hit: ~1ms (Redis) ou ~5ms (diskcache)
+        - Cache miss: ~200-500ms (embedding + FAISS search)
     """
     import faiss
 
-    # Check persistent cache
+    # Check persistent cache (Redis > diskcache > JSON)
     cache_key = f"{query}:{doc_type}:{limit}"
-    cache = load_query_cache()
-    if cache_key in cache:
-        entry = cache[cache_key]
-        # Retorna dados do cache (formato novo tem "data", formato convertido tambem)
-        return entry.get("data", entry) if isinstance(entry, dict) else entry
+    cached = cache_get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit para: {cache_key[:50]}...")
+        return cached
 
     index, metadata = load_faiss_index(auto_rebuild=auto_rebuild)
     if index is None:
@@ -493,7 +682,7 @@ def semantic_search(query: str, doc_type: str = None, limit: int = TOP_K, auto_r
 
         results.append({
             "chunk_id": f"{idx}",
-            "score": float(dist),  # Já é similaridade (inner product normalizado)
+            "score": float(dist),  # Ja e similaridade (inner product normalizado)
             "text": metadata["texts"][idx],
             "source": meta["source"],
             "doc_type": meta["doc_type"]
@@ -502,9 +691,8 @@ def semantic_search(query: str, doc_type: str = None, limit: int = TOP_K, auto_r
         if len(results) >= limit:
             break
 
-    # Save to persistent cache with timestamp
-    cache[cache_key] = {"data": results, "timestamp": time.time()}
-    save_query_cache(cache)
+    # Save to persistent cache (Redis > diskcache > JSON)
+    cache_set(cache_key, results)
 
     return results
 
@@ -533,7 +721,7 @@ def get_context_for_query(query: str, max_tokens: int = 2000) -> str:
 
 
 def get_stats() -> Dict:
-    """Retorna estatísticas do índice FAISS"""
+    """Retorna estatisticas do indice FAISS e cache."""
     index, metadata = load_faiss_index(auto_rebuild=False)
     doc_index = load_doc_index()
     rebuild_state = load_rebuild_state()
@@ -542,13 +730,14 @@ def get_stats() -> Dict:
         return {
             "documents": len(doc_index.get("documents", {})),
             "chunks": 0,
-            "faiss_status": "não construído"
+            "faiss_status": "nao construido",
+            "cache": cache_stats(),
         }
 
     sources = set(m["source"] for m in metadata["meta"])
     doc_types = set(m["doc_type"] for m in metadata["meta"])
 
-    # Verifica se índice está obsoleto
+    # Verifica se indice esta obsoleto
     is_stale, stale_reason = is_index_stale()
 
     return {
@@ -560,7 +749,8 @@ def get_stats() -> Dict:
         "last_rebuild": rebuild_state.get("last_rebuild", "desconhecido"),
         "is_stale": is_stale,
         "stale_reason": stale_reason if is_stale else None,
-        "auto_rebuild_enabled": AUTO_REBUILD_ENABLED
+        "auto_rebuild_enabled": AUTO_REBUILD_ENABLED,
+        "cache": cache_stats(),
     }
 
 
@@ -570,13 +760,16 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Uso: faiss_rag.py <comando> [args]")
         print("\nComandos:")
-        print("  build              - Constrói índice FAISS (se não existir)")
-        print("  rebuild            - Reconstrói índice FAISS (força rebuild)")
-        print("  check              - Verifica se índice está obsoleto")
-        print("  auto-rebuild       - Verifica e reconstrói se necessário")
-        print("  search <query>     - Busca semântica")
+        print("  build              - Constroi indice FAISS (se nao existir)")
+        print("  rebuild            - Reconstroi indice FAISS (forca rebuild)")
+        print("  check              - Verifica se indice esta obsoleto")
+        print("  auto-rebuild       - Verifica e reconstroi se necessario")
+        print("  search <query>     - Busca semantica")
         print("  context <query>    - Retorna contexto formatado")
-        print("  stats              - Mostra estatísticas")
+        print("  stats              - Mostra estatisticas")
+        print("  cache-stats        - Mostra estatisticas do cache")
+        print("  cache-clear        - Limpa o cache de queries")
+        print("  benchmark <query>  - Testa performance do cache")
         sys.exit(1)
 
     cmd = sys.argv[1]
@@ -628,9 +821,59 @@ if __name__ == "__main__":
 
     elif cmd == "stats":
         stats = get_stats()
-        print("\nEstatísticas FAISS RAG:")
+        print("\nEstatisticas FAISS RAG:")
+        for k, v in stats.items():
+            if k == "cache":
+                print(f"  {k}:")
+                for ck, cv in v.items():
+                    print(f"    {ck}: {cv}")
+            else:
+                print(f"  {k}: {v}")
+
+    elif cmd == "cache-stats":
+        stats = cache_stats()
+        print("\nEstatisticas do Cache:")
         for k, v in stats.items():
             print(f"  {k}: {v}")
+
+    elif cmd == "cache-clear":
+        cache_clear()
+        print("Cache limpo com sucesso!")
+
+    elif cmd == "benchmark":
+        if len(sys.argv) < 3:
+            print("Uso: benchmark <query>")
+            sys.exit(1)
+        query = " ".join(sys.argv[2:])
+
+        # Limpa cache primeiro
+        cache_clear()
+
+        # Primeira busca (cold cache)
+        start = time.time()
+        results1 = semantic_search(query)
+        cold_time = (time.time() - start) * 1000
+
+        # Segunda busca (warm cache)
+        start = time.time()
+        results2 = semantic_search(query)
+        warm_time = (time.time() - start) * 1000
+
+        # Terceira busca (confirma cache)
+        start = time.time()
+        results3 = semantic_search(query)
+        warm_time2 = (time.time() - start) * 1000
+
+        print(f"\nBenchmark para: '{query}'")
+        print(f"  Resultados: {len(results1)}")
+        print(f"\n  Cold cache (sem cache): {cold_time:.2f}ms")
+        print(f"  Warm cache (com cache): {warm_time:.2f}ms")
+        print(f"  Warm cache 2:           {warm_time2:.2f}ms")
+        print(f"\n  Speedup: {cold_time/warm_time:.1f}x")
+        print(f"  Reducao latencia: {((cold_time-warm_time)/cold_time)*100:.1f}%")
+
+        stats = cache_stats()
+        print(f"\n  Cache backend: {stats.get('backend', 'unknown')}")
 
     else:
         print(f"Comando desconhecido: {cmd}")

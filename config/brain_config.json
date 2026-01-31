@@ -1,0 +1,29 @@
+{
+  "watch_dirs": [
+    "/root/vsl-analysis",
+    "/root/claude-swarm-plugin",
+    "/root/slack-claude-bot",
+    "/root/claude-brain"
+  ],
+  "extensions": [".md", ".py", ".js", ".ts", ".yaml", ".yml", ".json", ".txt"],
+  "ignore_patterns": [
+    ".git", "__pycache__", "node_modules", ".venv", "venv",
+    ".egg-info", "dist", "build", ".cache", ".pytest_cache"
+  ],
+  "technologies": {
+    "languages": ["python", "javascript", "typescript", "rust", "go", "java", "cpp", "c"],
+    "frameworks": ["react", "vue", "angular", "django", "flask", "fastapi", "nextjs", "express"],
+    "databases": ["postgres", "mysql", "sqlite", "mongodb", "redis", "elasticsearch"],
+    "tools": ["docker", "kubernetes", "terraform", "git", "github", "gitlab"]
+  },
+  "indexer": {
+    "check_interval_seconds": 60,
+    "max_documents": 100,
+    "max_doc_size_bytes": 20000,
+    "chunk_size": 1500
+  },
+  "cache": {
+    "max_size": 100,
+    "ttl_seconds": 86400
+  }
+}

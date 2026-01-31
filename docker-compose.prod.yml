@@ -1,0 +1,89 @@
+# Production-grade docker-compose configuration
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+version: '3.8'
+
+services:
+  brain-api:
+    # Production resource limits (higher than dev)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+      # Restart policy for production
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+        window: 120s
+
+    # Production logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+        compress: "true"
+
+    # Production environment overrides
+    environment:
+      LOG_LEVEL: WARNING
+      ENABLE_METRICS: "true"
+      SQLITE_SYNCHRONOUS: FULL
+      SQLITE_JOURNAL_MODE: WAL
+
+    # Disable health check in production (use external monitoring)
+    # Uncomment if using external health check service
+    # healthcheck:
+    #   disable: true
+
+  # Redis for production caching
+  redis:
+    image: redis:7-alpine
+    container_name: claude-brain-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme}
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL for production database (optional alternative to SQLite)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: claude-brain-db
+  #   environment:
+  #     POSTGRES_DB: claude_brain
+  #     POSTGRES_USER: brainuser
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+  #   ports:
+  #     - "127.0.0.1:5432:5432"
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   restart: always
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U brainuser"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+volumes:
+  redis-data:
+    driver: local
+  # postgres-data:
+  #   driver: local
+
+networks:
+  default:
+    name: claude-brain-network
+    driver: bridge

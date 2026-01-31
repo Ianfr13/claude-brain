@@ -1,0 +1,651 @@
+#!/usr/bin/env python3
+"""
+Claude Brain - FAISS RAG Engine
+Busca semântica usando FAISS (sem ChromaDB)
+
+Features:
+- Auto-rebuild: Reconstrói índice automaticamente quando documentos mudam
+- Cache de queries com TTL
+- Logging de operações de rebuild
+"""
+
+import os
+import json
+import time
+import logging
+import hashlib
+import fcntl
+import numpy as np
+from pathlib import Path
+from datetime import datetime
+from typing import List, Dict, Optional, Tuple
+
+# Configuração de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger("faiss_rag")
+
+# Paths
+BRAIN_DIR = Path("/root/claude-brain")
+RAG_DIR = BRAIN_DIR / "rag"
+FAISS_DIR = RAG_DIR / "faiss"
+INDEX_FILE = RAG_DIR / "index.json"
+FAISS_INDEX_FILE = FAISS_DIR / "index.faiss"
+FAISS_META_FILE = FAISS_DIR / "metadata.json"
+REBUILD_STATE_FILE = FAISS_DIR / "rebuild_state.json"
+
+# Configuração
+TOP_K = 5
+EMBEDDING_DIM = 384  # all-MiniLM-L6-v2
+AUTO_REBUILD_ENABLED = True  # Flag global para habilitar/desabilitar auto-rebuild
+
+# Limites de indexação
+MAX_DOCUMENTS = 100       # Máximo de documentos a indexar
+MAX_DOC_SIZE = 20000      # Tamanho máximo por documento (20KB)
+CHUNK_SIZE = 1500         # Tamanho de cada chunk para embeddings
+MIN_CHUNK_LENGTH = 100    # Tamanho mínimo de chunk para ser indexado
+
+# Global model (carregado uma vez)
+_model = None
+_faiss_index = None
+_faiss_metadata = None
+CACHE_MAX_SIZE = 100
+CACHE_FILE = RAG_DIR / "query_cache.json"
+CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 horas
+
+
+def load_query_cache() -> dict:
+    """Carrega cache de queries do disco, removendo entradas expiradas.
+
+    Formato do cache:
+    - Novo formato (com TTL): {"key": {"data": [...], "timestamp": 1234567890}}
+    - Formato antigo (sem TTL): {"key": [...]}
+
+    Entradas no formato antigo sao convertidas automaticamente.
+    """
+    if CACHE_FILE.exists():
+        try:
+            cache = json.loads(CACHE_FILE.read_text())
+            current_time = time.time()
+            cleaned_cache = {}
+
+            for key, value in cache.items():
+                # Compatibilidade: formato antigo (lista direta) -> converte para novo formato
+                if isinstance(value, list):
+                    # Entrada antiga sem timestamp - considera como recem criada
+                    cleaned_cache[key] = {"data": value, "timestamp": current_time}
+                elif isinstance(value, dict) and "data" in value and "timestamp" in value:
+                    # Formato novo - verifica TTL
+                    if current_time - value["timestamp"] < CACHE_TTL_SECONDS:
+                        cleaned_cache[key] = value
+                    # Entrada expirada - nao inclui no cache limpo
+
+            return cleaned_cache
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Erro ao carregar cache: {e}")
+    return {}
+
+
+def save_query_cache(cache: dict):
+    """Salva cache de queries no disco.
+
+    O cache usa formato com TTL: {"key": {"data": [...], "timestamp": 1234567890}}
+    Limita tamanho removendo entradas mais antigas primeiro.
+    """
+    # Limita tamanho - remove as mais antigas primeiro
+    if len(cache) > CACHE_MAX_SIZE:
+        # Ordena por timestamp (mais antigos primeiro)
+        sorted_keys = sorted(
+            cache.keys(),
+            key=lambda k: cache[k].get("timestamp", 0) if isinstance(cache[k], dict) else 0
+        )
+        # Remove entradas mais antigas
+        for k in sorted_keys[:len(cache) - CACHE_MAX_SIZE]:
+            del cache[k]
+
+    # Escrita atômica com file locking para evitar race condition
+    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            json.dump(cache, f, ensure_ascii=False)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def invalidate_query_cache():
+    """Invalida o cache de queries (chamado após rebuild)."""
+    if CACHE_FILE.exists():
+        try:
+            CACHE_FILE.unlink()
+            logger.info("Cache de queries invalidado após rebuild")
+        except Exception as e:
+            logger.warning(f"Erro ao invalidar cache: {e}")
+
+
+def get_model():
+    """Carrega modelo de embeddings (singleton)"""
+    global _model
+    if _model is None:
+        os.environ['HF_HUB_OFFLINE'] = '1'
+        os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+        from sentence_transformers import SentenceTransformer
+        _model = SentenceTransformer('all-MiniLM-L6-v2')
+    return _model
+
+
+def ensure_dirs():
+    """Cria diretórios necessários"""
+    FAISS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_doc_index() -> Dict:
+    """Carrega índice de documentos"""
+    if INDEX_FILE.exists():
+        return json.loads(INDEX_FILE.read_text())
+    return {"documents": {}}
+
+
+def load_rebuild_state() -> Dict:
+    """Carrega estado do último rebuild."""
+    if REBUILD_STATE_FILE.exists():
+        try:
+            return json.loads(REBUILD_STATE_FILE.read_text())
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Erro ao carregar estado de rebuild: {e}")
+    return {}
+
+
+def save_rebuild_state(state: Dict):
+    """Salva estado do rebuild."""
+    ensure_dirs()
+    REBUILD_STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+def compute_documents_hash(doc_index: Dict) -> str:
+    """Computa hash dos documentos para detectar mudanças.
+
+    Considera:
+    - Lista de documentos (hashes)
+    - Timestamps de modificação dos arquivos fonte
+    """
+    hash_data = []
+
+    for doc_hash, doc_info in sorted(doc_index.get("documents", {}).items()):
+        source = doc_info.get("source", "")
+        source_path = Path(source)
+
+        # Inclui hash do documento
+        hash_data.append(doc_hash)
+
+        # Inclui timestamp de modificação do arquivo (se existir)
+        if source_path.exists():
+            try:
+                mtime = source_path.stat().st_mtime
+                hash_data.append(f"{source}:{mtime}")
+            except (OSError, IOError) as e:
+                logger.warning(f"Erro ao obter mtime de {source}: {e}")
+                hash_data.append(source)
+
+    # Gera hash combinado (SHA256 para integridade)
+    combined = "|".join(hash_data)
+    return hashlib.sha256(combined.encode()).hexdigest()
+
+
+def is_index_stale() -> Tuple[bool, str]:
+    """Verifica se o índice FAISS está obsoleto.
+
+    Retorna:
+        Tuple[bool, str]: (está_obsoleto, motivo)
+
+    Critérios para índice obsoleto:
+    1. Índice não existe
+    2. index.json foi modificado após o índice FAISS
+    3. Hash dos documentos mudou desde o último rebuild
+    4. Algum arquivo fonte foi modificado após o índice
+    """
+    # Verifica se índice existe
+    if not FAISS_INDEX_FILE.exists() or not FAISS_META_FILE.exists():
+        return True, "Índice FAISS não existe"
+
+    # Timestamp do índice FAISS
+    faiss_mtime = FAISS_INDEX_FILE.stat().st_mtime
+
+    # Verifica se index.json foi modificado após o índice
+    if INDEX_FILE.exists():
+        index_mtime = INDEX_FILE.stat().st_mtime
+        if index_mtime > faiss_mtime:
+            return True, f"index.json modificado ({datetime.fromtimestamp(index_mtime).strftime('%Y-%m-%d %H:%M:%S')})"
+
+    # Carrega estado do último rebuild
+    rebuild_state = load_rebuild_state()
+    last_hash = rebuild_state.get("documents_hash", "")
+
+    # Computa hash atual dos documentos
+    doc_index = load_doc_index()
+    current_hash = compute_documents_hash(doc_index)
+
+    if last_hash and current_hash != last_hash:
+        return True, "Hash dos documentos mudou"
+
+    # Verifica se algum arquivo fonte foi modificado após o índice
+    for doc_hash, doc_info in doc_index.get("documents", {}).items():
+        source = doc_info.get("source", "")
+        source_path = Path(source)
+
+        if source_path.exists():
+            try:
+                source_mtime = source_path.stat().st_mtime
+                if source_mtime > faiss_mtime:
+                    return True, f"Arquivo modificado: {source}"
+            except (OSError, IOError) as e:
+                logger.warning(f"Erro ao verificar mtime de {source}: {e}")
+
+    return False, "Índice está atualizado"
+
+
+def check_and_rebuild(force: bool = False) -> Dict:
+    """Verifica se precisa rebuild e executa se necessário.
+
+    Args:
+        force: Se True, força rebuild mesmo se índice estiver atualizado
+
+    Returns:
+        Dict com status da operação
+    """
+    if force:
+        logger.info("Rebuild forçado solicitado")
+        return build_faiss_index(force=True, log_rebuild=True)
+
+    if not AUTO_REBUILD_ENABLED:
+        return {"status": "skipped", "reason": "Auto-rebuild desabilitado"}
+
+    is_stale, reason = is_index_stale()
+
+    if is_stale:
+        logger.info(f"Índice obsoleto detectado: {reason}")
+        return build_faiss_index(force=True, log_rebuild=True)
+
+    return {"status": "current", "reason": reason}
+
+
+def clear_index_cache():
+    """Limpa cache em memória do índice FAISS."""
+    global _faiss_index, _faiss_metadata
+    _faiss_index = None
+    _faiss_metadata = None
+
+
+def load_faiss_index(auto_rebuild: bool = True):
+    """Carrega índice FAISS e metadados.
+
+    Args:
+        auto_rebuild: Se True, verifica e reconstrói índice se necessário
+    """
+    global _faiss_index, _faiss_metadata
+
+    # Verifica auto-rebuild antes de carregar
+    if auto_rebuild and AUTO_REBUILD_ENABLED:
+        is_stale, reason = is_index_stale()
+        if is_stale:
+            logger.info(f"Auto-rebuild ativado: {reason}")
+            clear_index_cache()
+            build_faiss_index(force=True, log_rebuild=True)
+
+    if _faiss_index is not None:
+        return _faiss_index, _faiss_metadata
+
+    # Security: Migração segura pkl → json (one-time)
+    old_pkl = FAISS_DIR / "metadata.pkl"
+    if old_pkl.exists():
+        if not FAISS_META_FILE.exists():
+            import pickle
+            logger.info("Migrando metadata.pkl → metadata.json (segurança)")
+            with open(old_pkl, 'rb') as f:
+                data = pickle.load(f)
+            with open(FAISS_META_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False)
+        # Renomeia arquivo antigo para backup
+        old_pkl.rename(old_pkl.with_suffix('.pkl.migrated'))
+        logger.info("Arquivo pkl migrado e renomeado para .pkl.migrated")
+
+    if FAISS_INDEX_FILE.exists() and FAISS_META_FILE.exists():
+        import faiss
+        _faiss_index = faiss.read_index(str(FAISS_INDEX_FILE))
+        with open(FAISS_META_FILE, 'r', encoding='utf-8') as f:
+            _faiss_metadata = json.load(f)
+        return _faiss_index, _faiss_metadata
+
+    return None, None
+
+
+def save_faiss_index(index, metadata):
+    """Salva índice FAISS e metadados"""
+    global _faiss_index, _faiss_metadata
+    import faiss
+
+    ensure_dirs()
+    faiss.write_index(index, str(FAISS_INDEX_FILE))
+    with open(FAISS_META_FILE, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, ensure_ascii=False)
+
+    _faiss_index = index
+    _faiss_metadata = metadata
+
+
+def build_faiss_index(force: bool = False, log_rebuild: bool = False) -> Dict:
+    """Constrói índice FAISS a partir dos documentos indexados.
+
+    Args:
+        force: Se True, reconstrói mesmo se índice existir
+        log_rebuild: Se True, loga informações detalhadas sobre o rebuild
+    """
+    import faiss
+
+    if not force:
+        index, meta = load_faiss_index(auto_rebuild=False)
+        if index is not None:
+            return {"status": "exists", "count": index.ntotal}
+
+    start_time = time.time()
+
+    if log_rebuild:
+        logger.info("=" * 50)
+        logger.info("INICIANDO REBUILD DO ÍNDICE FAISS")
+        logger.info(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    print("Construindo índice FAISS...")
+    doc_index = load_doc_index()
+
+    if not doc_index.get("documents"):
+        return {"status": "error", "message": "Nenhum documento indexado"}
+
+    model = get_model()
+    texts = []
+    metadata = []
+
+    # Prioriza markdown e limita total de documentos
+    priority_types = ["markdown", "python", "yaml"]
+    docs_list = sorted(
+        doc_index["documents"].items(),
+        key=lambda x: (0 if x[1].get("doc_type") in priority_types else 1, x[0])
+    )[:MAX_DOCUMENTS]
+
+    processed_files = 0
+    skipped_files = 0
+
+    for doc_hash, doc_info in docs_list:
+        source = doc_info.get("source", "")
+        source_path = Path(source)
+
+        if not source_path.exists():
+            skipped_files += 1
+            continue
+
+        try:
+            content = source_path.read_text(errors='ignore')
+            # Limita tamanho do documento
+            if len(content) > MAX_DOC_SIZE:
+                content = content[:MAX_DOC_SIZE]
+            # Divide em chunks
+            for i in range(0, len(content), CHUNK_SIZE):
+                chunk = content[i:i+CHUNK_SIZE]
+                if len(chunk.strip()) > MIN_CHUNK_LENGTH:
+                    texts.append(chunk)
+                    metadata.append({
+                        "source": source,
+                        "doc_type": doc_info.get("doc_type", "generic"),
+                        "position": i
+                    })
+            processed_files += 1
+        except Exception as e:
+            print(f"  Erro em {source}: {e}")
+            skipped_files += 1
+            continue
+
+    if not texts:
+        return {"status": "error", "message": "Nenhum texto para indexar"}
+
+    print(f"  Gerando embeddings para {len(texts)} chunks...")
+    embeddings = model.encode(texts, show_progress_bar=True)
+    embeddings = embeddings.astype('float32')
+
+    # Cria índice FAISS
+    index = faiss.IndexFlatIP(EMBEDDING_DIM)  # Inner Product (cosine similarity com normalização)
+    faiss.normalize_L2(embeddings)  # Normaliza para cosine similarity
+    index.add(embeddings)
+
+    # Salva índice
+    save_faiss_index(index, {"texts": texts, "meta": metadata})
+
+    # Salva estado do rebuild
+    current_hash = compute_documents_hash(doc_index)
+    rebuild_state = {
+        "documents_hash": current_hash,
+        "last_rebuild": datetime.now().isoformat(),
+        "chunks_count": index.ntotal,
+        "documents_processed": processed_files,
+        "documents_skipped": skipped_files
+    }
+    save_rebuild_state(rebuild_state)
+
+    # Invalida cache de queries após rebuild
+    invalidate_query_cache()
+
+    # Limpa cache em memória para forçar recarga
+    clear_index_cache()
+
+    elapsed_time = time.time() - start_time
+
+    if log_rebuild:
+        logger.info(f"Documentos processados: {processed_files}")
+        logger.info(f"Documentos ignorados: {skipped_files}")
+        logger.info(f"Chunks gerados: {index.ntotal}")
+        logger.info(f"Tempo de rebuild: {elapsed_time:.2f}s")
+        logger.info(f"Hash dos documentos: {current_hash}")
+        logger.info("REBUILD CONCLUÍDO COM SUCESSO")
+        logger.info("=" * 50)
+
+    print(f"  Índice FAISS criado com {index.ntotal} vetores")
+    return {
+        "status": "created" if not force else "rebuilt",
+        "count": index.ntotal,
+        "elapsed_seconds": round(elapsed_time, 2),
+        "documents_processed": processed_files
+    }
+
+
+def semantic_search(query: str, doc_type: str = None, limit: int = TOP_K, auto_rebuild: bool = True) -> List[Dict]:
+    """Busca semântica usando FAISS com cache persistente.
+
+    Args:
+        query: Termo de busca
+        doc_type: Filtrar por tipo de documento (markdown, python, etc)
+        limit: Número máximo de resultados (default: TOP_K=5)
+        auto_rebuild: Se True, verifica e reconstrói índice se necessário
+
+    Returns:
+        Lista de dicts com keys: score, text, source, doc_type
+    """
+    import faiss
+
+    # Check persistent cache
+    cache_key = f"{query}:{doc_type}:{limit}"
+    cache = load_query_cache()
+    if cache_key in cache:
+        entry = cache[cache_key]
+        # Retorna dados do cache (formato novo tem "data", formato convertido tambem)
+        return entry.get("data", entry) if isinstance(entry, dict) else entry
+
+    index, metadata = load_faiss_index(auto_rebuild=auto_rebuild)
+    if index is None:
+        # Tenta construir
+        result = build_faiss_index(log_rebuild=True)
+        if result["status"] == "error":
+            return []
+        index, metadata = load_faiss_index(auto_rebuild=False)
+
+    model = get_model()
+    query_embedding = model.encode([query]).astype('float32')
+    faiss.normalize_L2(query_embedding)
+
+    # Busca mais resultados se filtrar por tipo
+    search_k = limit * 3 if doc_type else limit
+
+    distances, indices = index.search(query_embedding, min(search_k, index.ntotal))
+
+    results = []
+    for dist, idx in zip(distances[0], indices[0]):
+        if idx < 0:
+            continue
+
+        meta = metadata["meta"][idx]
+        if doc_type and meta["doc_type"] != doc_type:
+            continue
+
+        results.append({
+            "chunk_id": f"{idx}",
+            "score": float(dist),  # Já é similaridade (inner product normalizado)
+            "text": metadata["texts"][idx],
+            "source": meta["source"],
+            "doc_type": meta["doc_type"]
+        })
+
+        if len(results) >= limit:
+            break
+
+    # Save to persistent cache with timestamp
+    cache[cache_key] = {"data": results, "timestamp": time.time()}
+    save_query_cache(cache)
+
+    return results
+
+
+def get_context_for_query(query: str, max_tokens: int = 2000) -> str:
+    """Retorna contexto formatado para o Claude baseado na query"""
+    results = semantic_search(query, limit=5)
+
+    if not results:
+        return "Nenhum contexto relevante encontrado na memória."
+
+    output = ["## Contexto Relevante da Memória\n"]
+    token_estimate = 0
+
+    for r in results:
+        chunk_text = f"\n### Fonte: {r['source']}\n{r['text']}\n"
+        chunk_tokens = len(chunk_text) // 4
+
+        if token_estimate + chunk_tokens > max_tokens:
+            break
+
+        output.append(chunk_text)
+        token_estimate += chunk_tokens
+
+    return "\n".join(output)
+
+
+def get_stats() -> Dict:
+    """Retorna estatísticas do índice FAISS"""
+    index, metadata = load_faiss_index(auto_rebuild=False)
+    doc_index = load_doc_index()
+    rebuild_state = load_rebuild_state()
+
+    if index is None:
+        return {
+            "documents": len(doc_index.get("documents", {})),
+            "chunks": 0,
+            "faiss_status": "não construído"
+        }
+
+    sources = set(m["source"] for m in metadata["meta"])
+    doc_types = set(m["doc_type"] for m in metadata["meta"])
+
+    # Verifica se índice está obsoleto
+    is_stale, stale_reason = is_index_stale()
+
+    return {
+        "documents": len(doc_index.get("documents", {})),
+        "chunks": index.ntotal,
+        "sources": list(sources)[:10],
+        "doc_types": list(doc_types),
+        "faiss_status": "ativo",
+        "last_rebuild": rebuild_state.get("last_rebuild", "desconhecido"),
+        "is_stale": is_stale,
+        "stale_reason": stale_reason if is_stale else None,
+        "auto_rebuild_enabled": AUTO_REBUILD_ENABLED
+    }
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Uso: faiss_rag.py <comando> [args]")
+        print("\nComandos:")
+        print("  build              - Constrói índice FAISS (se não existir)")
+        print("  rebuild            - Reconstrói índice FAISS (força rebuild)")
+        print("  check              - Verifica se índice está obsoleto")
+        print("  auto-rebuild       - Verifica e reconstrói se necessário")
+        print("  search <query>     - Busca semântica")
+        print("  context <query>    - Retorna contexto formatado")
+        print("  stats              - Mostra estatísticas")
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+
+    if cmd == "build":
+        result = build_faiss_index()
+        print(f"Resultado: {result}")
+
+    elif cmd == "rebuild":
+        result = build_faiss_index(force=True, log_rebuild=True)
+        print(f"Resultado: {result}")
+
+    elif cmd == "check":
+        is_stale, reason = is_index_stale()
+        if is_stale:
+            print(f"Índice OBSOLETO: {reason}")
+        else:
+            print(f"Índice ATUALIZADO: {reason}")
+
+        # Mostra informações adicionais
+        rebuild_state = load_rebuild_state()
+        if rebuild_state:
+            print(f"\nÚltimo rebuild: {rebuild_state.get('last_rebuild', 'N/A')}")
+            print(f"Chunks: {rebuild_state.get('chunks_count', 'N/A')}")
+            print(f"Docs processados: {rebuild_state.get('documents_processed', 'N/A')}")
+
+    elif cmd == "auto-rebuild":
+        result = check_and_rebuild()
+        print(f"Resultado: {result}")
+
+    elif cmd == "search":
+        if len(sys.argv) < 3:
+            print("Uso: search <query>")
+            sys.exit(1)
+        query = " ".join(sys.argv[2:])
+        results = semantic_search(query)
+        print(f"\nResultados para: '{query}'\n")
+        for r in results:
+            print(f"[{r['score']:.3f}] {r['source']}")
+            print(f"  {r['text'][:150]}...\n")
+
+    elif cmd == "context":
+        if len(sys.argv) < 3:
+            print("Uso: context <query>")
+            sys.exit(1)
+        query = " ".join(sys.argv[2:])
+        context = get_context_for_query(query)
+        print(context)
+
+    elif cmd == "stats":
+        stats = get_stats()
+        print("\nEstatísticas FAISS RAG:")
+        for k, v in stats.items():
+            print(f"  {k}: {v}")
+
+    else:
+        print(f"Comando desconhecido: {cmd}")
+        sys.exit(1)

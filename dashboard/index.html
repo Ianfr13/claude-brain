@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Brain Dashboard</title>
+    <script src="https://cdn.tailwindcss.com?v=3"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brain: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            200: '#bae6fd',
+                            300: '#7dd3fc',
+                            400: '#38bdf8',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [x-cloak] { display: none !important; }
+
+        .gradient-bg {
+            background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 50%, #1e1b4b 100%);
+        }
+
+        .card-glow {
+            box-shadow: 0 0 40px rgba(59, 130, 246, 0.1);
+        }
+
+        .stat-card {
+            background: linear-gradient(145deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.9));
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+
+        .stat-card:hover {
+            border-color: rgba(59, 130, 246, 0.5);
+            transform: translateY(-2px);
+        }
+
+        .pulse-dot {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .scrollbar-thin::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+
+        .bar-animate {
+            transition: width 0.5s ease-out;
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen text-gray-100">
+    <div x-data="dashboard()" x-init="init()" class="container mx-auto px-4 py-6 max-w-7xl">
+
+        <!-- Header -->
+        <header class="mb-8">
+            <div class="flex items-center justify-between flex-wrap gap-4">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+                        <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                            Claude Brain Dashboard
+                        </h1>
+                        <p class="text-gray-400 text-sm">Sistema de Memoria Inteligente</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-4">
+                    <!-- Status Indicator -->
+                    <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700">
+                        <span class="w-2 h-2 rounded-full" :class="connected ? 'bg-green-500 pulse-dot' : 'bg-red-500'"></span>
+                        <span class="text-sm text-gray-400" x-text="connected ? 'Conectado' : 'Desconectado'"></span>
+                    </div>
+
+                    <!-- Auto Refresh -->
+                    <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700">
+                        <svg class="w-4 h-4 text-gray-400" :class="{'animate-spin': loading}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        <span class="text-sm text-gray-400" x-text="'Auto: ' + countdown + 's'"></span>
+                    </div>
+
+                    <!-- Manual Refresh -->
+                    <button @click="fetchAll()"
+                            class="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                            :disabled="loading"
+                            aria-label="Atualizar dados">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Stats Cards (Clickable) -->
+        <section class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
+            <template x-for="stat in statsCards" :key="stat.label">
+                <div @click="openDetailModal(stat.type)"
+                     class="stat-card rounded-xl p-4 transition-all duration-300 cursor-pointer hover:scale-105 hover:border-blue-500/50">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg flex items-center justify-center" :class="stat.bgColor">
+                            <span class="text-xl" x-text="stat.icon"></span>
+                        </div>
+                        <div>
+                            <p class="text-2xl font-bold" x-text="stat.value"></p>
+                            <p class="text-xs text-gray-400" x-text="stat.label"></p>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </section>
+
+        <!-- Main Grid -->
+        <div class="grid lg:grid-cols-3 gap-6 mb-8">
+
+            <!-- Busca Semantica -->
+            <div class="lg:col-span-2 stat-card rounded-xl p-6 card-glow">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    Busca Semantica
+                </h2>
+
+                <div class="flex gap-3 mb-4">
+                    <input type="text"
+                           x-model="searchQuery"
+                           @keyup.enter="performSearch()"
+                           placeholder="Buscar no brain..."
+                           class="flex-1 bg-slate-800/50 border border-slate-600 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition-colors">
+                    <button @click="performSearch()"
+                            :disabled="searching"
+                            class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 rounded-lg font-medium transition-colors flex items-center gap-2">
+                        <svg x-show="searching" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span x-text="searching ? 'Buscando...' : 'Buscar'"></span>
+                    </button>
+                </div>
+
+                <!-- Search Results -->
+                <div x-show="searchResults.length > 0" class="space-y-3 max-h-80 overflow-y-auto scrollbar-thin">
+                    <template x-for="(result, index) in searchResults" :key="index">
+                        <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700 hover:border-slate-600 transition-colors">
+                            <div class="flex items-start justify-between mb-2">
+                                <span class="text-sm font-medium text-blue-400" x-text="result.source || 'Memoria'"></span>
+                                <span class="text-xs px-2 py-0.5 rounded-full"
+                                      :class="result.score > 0.7 ? 'bg-green-500/20 text-green-400' : result.score > 0.4 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'"
+                                      x-text="(result.score * 100).toFixed(0) + '%'"></span>
+                            </div>
+                            <p class="text-sm text-gray-300 line-clamp-3" x-text="result.text || result.content"></p>
+                        </div>
+                    </template>
+                </div>
+
+                <div x-show="searchResults.length === 0 && searchQuery && !searching" class="text-center py-8 text-gray-400">
+                    <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <p>Nenhum resultado encontrado</p>
+                </div>
+            </div>
+
+            <!-- Eficacia Chart -->
+            <div class="stat-card rounded-xl p-6 card-glow">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                    Eficacia do Brain
+                </h2>
+
+                <!-- Effectiveness Ring -->
+                <div class="flex justify-center mb-6">
+                    <div class="relative w-32 h-32">
+                        <svg class="w-32 h-32 transform -rotate-90" aria-hidden="true" role="img">
+                            <circle cx="64" cy="64" r="56" stroke="currentColor" stroke-width="12" fill="none" class="text-slate-700"></circle>
+                            <circle cx="64" cy="64" r="56" stroke="currentColor" stroke-width="12" fill="none"
+                                    class="text-green-500"
+                                    :stroke-dasharray="352"
+                                    :stroke-dashoffset="352 - (352 * effectiveness.effectiveness_pct / 100)"
+                                    stroke-linecap="round"></circle>
+                        </svg>
+                        <div class="absolute inset-0 flex items-center justify-center">
+                            <span class="text-2xl font-bold" x-text="effectiveness.effectiveness_pct + '%'"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div class="space-y-3">
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-gray-400">Total de acoes</span>
+                        <span class="font-medium" x-text="effectiveness.total_actions || 0"></span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-gray-400">Avaliadas</span>
+                        <span class="font-medium" x-text="effectiveness.rated_actions || 0"></span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-green-400">Uteis</span>
+                        <span class="font-medium text-green-400" x-text="effectiveness.useful || 0"></span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-red-400">Nao uteis</span>
+                        <span class="font-medium text-red-400" x-text="effectiveness.not_useful || 0"></span>
+                    </div>
+                    <template x-if="effectiveness.avg_search_score">
+                        <div class="flex justify-between items-center text-sm pt-2 border-t border-slate-700">
+                            <span class="text-gray-400">Score medio de busca</span>
+                            <span class="font-medium text-blue-400" x-text="effectiveness.avg_search_score"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tables Row -->
+        <div class="grid lg:grid-cols-2 gap-6 mb-8">
+
+            <!-- Decisoes Recentes -->
+            <div class="stat-card rounded-xl p-6 card-glow">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Decisoes Recentes
+                </h2>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-gray-400 border-b border-slate-700">
+                                <th class="pb-3 font-medium w-12">Conf.</th>
+                                <th class="pb-3 font-medium">Projeto</th>
+                                <th class="pb-3 font-medium">Decisao</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-700/50">
+                            <template x-for="decision in decisions" :key="decision.id">
+                                <tr class="hover:bg-slate-800/30 transition-colors">
+                                    <td class="py-3">
+                                        <span class="text-lg" x-text="decision.maturity_status === 'confirmed' ? '✓' : decision.maturity_status === 'deprecated' ? '✗' : '○'"
+                                              :class="decision.maturity_status === 'confirmed' ? 'text-green-400' : decision.maturity_status === 'deprecated' ? 'text-red-400' : 'text-gray-500'"></span>
+                                        <span class="text-xs ml-1" :class="(decision.confidence_score || 0.5) >= 0.7 ? 'text-green-400' : 'text-gray-500'"
+                                              x-text="Math.round((decision.confidence_score || 0.5) * 100) + '%'"></span>
+                                    </td>
+                                    <td class="py-3">
+                                        <span class="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs" x-text="decision.project || 'global'"></span>
+                                    </td>
+                                    <td class="py-3 max-w-xs">
+                                        <p class="truncate" x-text="decision.decision" :title="decision.decision"></p>
+                                        <p x-show="decision.reasoning" class="text-xs text-gray-500 truncate" x-text="decision.reasoning"></p>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div x-show="decisions.length === 0" class="text-center py-8 text-gray-400">
+                    <p>Nenhuma decisao registrada</p>
+                </div>
+            </div>
+
+            <!-- Aprendizados -->
+            <div class="stat-card rounded-xl p-6 card-glow">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                    </svg>
+                    Aprendizados de Erros
+                </h2>
+
+                <div class="space-y-3 max-h-80 overflow-y-auto scrollbar-thin">
+                    <template x-for="learning in learnings" :key="learning.id">
+                        <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                            <div class="flex items-start justify-between mb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-lg" x-text="learning.maturity_status === 'confirmed' ? '✓' : '○'"
+                                          :class="learning.maturity_status === 'confirmed' ? 'text-green-400' : 'text-gray-500'"></span>
+                                    <span class="text-sm font-medium text-red-400" x-text="learning.error_type"></span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs" :class="(learning.confidence_score || 0.5) >= 0.7 ? 'text-green-400' : 'text-gray-500'"
+                                          x-text="Math.round((learning.confidence_score || 0.5) * 100) + '%'"></span>
+                                    <span class="text-xs px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full" x-text="learning.frequency + 'x'"></span>
+                                </div>
+                            </div>
+                            <p x-show="learning.context" class="text-xs text-cyan-400 mb-1">
+                                <span class="text-gray-500">Contexto: </span>
+                                <span x-text="learning.context"></span>
+                            </p>
+                            <p class="text-sm text-green-400 mb-1">
+                                <span class="text-gray-400">Solucao: </span>
+                                <span x-text="learning.solution"></span>
+                            </p>
+                            <p x-show="learning.prevention" class="text-xs text-gray-400">
+                                <span>Prevencao: </span>
+                                <span x-text="learning.prevention"></span>
+                            </p>
+                        </div>
+                    </template>
+                </div>
+
+                <div x-show="learnings.length === 0" class="text-center py-8 text-gray-400">
+                    <p>Nenhum aprendizado registrado</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Row -->
+        <div class="grid lg:grid-cols-3 gap-6">
+
+            <!-- Preferencias -->
+            <div class="stat-card rounded-xl p-6 card-glow">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path>
+                    </svg>
+                    Preferencias
+                </h2>
+
+                <div class="space-y-2 max-h-64 overflow-y-auto scrollbar-thin">
+                    <template x-for="(value, key) in preferences" :key="key">
+                        <div class="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
+                            <span class="text-sm text-gray-400" x-text="key"></span>
+                            <span class="text-sm font-medium text-pink-400" x-text="value"></span>
+                        </div>
+                    </template>
+                </div>
+
+                <div x-show="Object.keys(preferences).length === 0" class="text-center py-8 text-gray-400">
+                    <p>Nenhuma preferencia</p>
+                </div>
+            </div>
+
+            <!-- Acoes por Tipo -->
+            <div class="stat-card rounded-xl p-6 card-glow">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"></path>
+                    </svg>
+                    Acoes por Tipo
+                </h2>
+
+                <div class="space-y-4">
+                    <template x-for="(data, action) in effectiveness.by_action || {}" :key="action">
+                        <div>
+                            <div class="flex justify-between text-sm mb-1">
+                                <span class="text-gray-400 capitalize" x-text="action"></span>
+                                <span class="text-gray-300">
+                                    <span x-text="data.useful"></span>/<span x-text="data.total"></span>
+                                </span>
+                            </div>
+                            <div class="h-2 bg-slate-700 rounded-full overflow-hidden">
+                                <div class="h-full bg-gradient-to-r from-cyan-500 to-blue-500 bar-animate rounded-full"
+                                     :style="'width: ' + (data.total > 0 ? (data.useful / data.total * 100) : 0) + '%'"></div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <div x-show="!effectiveness.by_action || Object.keys(effectiveness.by_action).length === 0" class="text-center py-8 text-gray-400">
+                    <p>Sem dados de acoes</p>
+                </div>
+            </div>
+
+            <!-- Knowledge Graph Preview -->
+            <div class="stat-card rounded-xl p-6 card-glow">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+                    </svg>
+                    Knowledge Graph
+                </h2>
+
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div class="bg-slate-800/50 rounded-lg p-3 text-center">
+                        <p class="text-2xl font-bold text-orange-400" x-text="stats.entities || 0"></p>
+                        <p class="text-xs text-gray-400">Entidades</p>
+                    </div>
+                    <div class="bg-slate-800/50 rounded-lg p-3 text-center">
+                        <p class="text-2xl font-bold text-orange-400" x-text="stats.relations || 0"></p>
+                        <p class="text-xs text-gray-400">Relacoes</p>
+                    </div>
+                </div>
+
+                <!-- Entity Input -->
+                <div class="flex gap-2">
+                    <input type="text"
+                           x-model="entityQuery"
+                           @keyup.enter="fetchEntityGraph()"
+                           placeholder="Buscar entidade..."
+                           class="flex-1 bg-slate-800/50 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500">
+                    <button @click="fetchEntityGraph()"
+                            class="px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg text-sm transition-colors">
+                        Ver
+                    </button>
+                </div>
+
+                <!-- Entity Graph Display -->
+                <div x-show="entityGraph" class="mt-4 bg-slate-800/50 rounded-lg p-3">
+                    <p class="font-medium text-orange-400 mb-2" x-text="entityGraph?.entity?.name"></p>
+                    <p class="text-xs text-gray-400 mb-2" x-text="entityGraph?.entity?.type"></p>
+                    <template x-if="entityGraph?.outgoing?.length > 0">
+                        <div class="text-xs">
+                            <p class="text-gray-500 mb-1">Relacoes:</p>
+                            <template x-for="rel in entityGraph.outgoing.slice(0, 3)" :key="rel.to_entity">
+                                <p class="text-gray-300">
+                                    <span class="text-cyan-400" x-text="rel.relation_type"></span>
+                                    <span> -> </span>
+                                    <span x-text="rel.to_entity"></span>
+                                </p>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detail Modal -->
+        <div x-show="modalOpen"
+             x-transition:enter="transition ease-out duration-200"
+             x-transition:enter-start="opacity-0"
+             x-transition:enter-end="opacity-100"
+             x-transition:leave="transition ease-in duration-150"
+             x-transition:leave-start="opacity-100"
+             x-transition:leave-end="opacity-0"
+             class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+             @click.self="closeModal()">
+
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden shadow-2xl"
+                 x-transition:enter="transition ease-out duration-200"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100">
+
+                <!-- Modal Header -->
+                <div class="flex items-center justify-between p-6 border-b border-slate-700">
+                    <h2 id="modal-title" class="text-xl font-bold text-white" x-text="modalTitle"></h2>
+                    <button @click="closeModal()" class="p-2 hover:bg-slate-800 rounded-lg transition-colors" aria-label="Fechar modal">
+                        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Modal Content -->
+                <div class="p-6 overflow-y-auto max-h-[calc(85vh-80px)] scrollbar-thin">
+
+                    <!-- Loading -->
+                    <div x-show="modalLoading" class="flex items-center justify-center py-12" role="status" aria-label="Carregando">
+                        <svg class="w-8 h-8 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div x-show="!modalLoading && modalData.length === 0" class="text-center py-12 text-gray-400">
+                        <p>Nenhum item encontrado</p>
+                    </div>
+
+                    <!-- Memories -->
+                    <div x-show="!modalLoading && modalType === 'memories'" class="space-y-3">
+                        <template x-for="item in modalData" :key="item.id">
+                            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700 hover:border-blue-500/50 transition-colors">
+                                <div class="flex items-start justify-between mb-2">
+                                    <span class="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs" x-text="item.category || 'geral'"></span>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs text-gray-500" x-text="item.created_at"></span>
+                                        <span class="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs" x-text="'★' + (item.importance || 5)"></span>
+                                    </div>
+                                </div>
+                                <p class="text-gray-300" x-text="item.content"></p>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Decisions -->
+                    <div x-show="!modalLoading && modalType === 'decisions'" class="space-y-3">
+                        <template x-for="item in modalData" :key="item.id">
+                            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700 hover:border-purple-500/50 transition-colors">
+                                <div class="flex items-start justify-between mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-lg" x-text="item.maturity_status === 'confirmed' ? '✓' : item.maturity_status === 'deprecated' ? '✗' : '○'"
+                                              :class="item.maturity_status === 'confirmed' ? 'text-green-400' : item.maturity_status === 'deprecated' ? 'text-red-400' : 'text-gray-500'"></span>
+                                        <span class="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs" x-text="item.project || 'global'"></span>
+                                    </div>
+                                    <span class="text-xs" :class="(item.confidence_score || 0.5) >= 0.7 ? 'text-green-400' : 'text-gray-500'"
+                                          x-text="Math.round((item.confidence_score || 0.5) * 100) + '%'"></span>
+                                </div>
+                                <p class="text-gray-200 font-medium mb-1" x-text="item.decision"></p>
+                                <p x-show="item.reasoning" class="text-sm text-gray-400" x-text="item.reasoning"></p>
+                                <p x-show="item.context" class="text-xs text-cyan-400 mt-2" x-text="'Contexto: ' + item.context"></p>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Learnings -->
+                    <div x-show="!modalLoading && modalType === 'learnings'" class="space-y-3">
+                        <template x-for="item in modalData" :key="item.id">
+                            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700 hover:border-yellow-500/50 transition-colors">
+                                <div class="flex items-start justify-between mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-lg" x-text="item.maturity_status === 'confirmed' ? '✓' : '○'"
+                                              :class="item.maturity_status === 'confirmed' ? 'text-green-400' : 'text-gray-500'"></span>
+                                        <span class="font-medium text-red-400" x-text="item.error_type"></span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs" :class="(item.confidence_score || 0.5) >= 0.7 ? 'text-green-400' : 'text-gray-500'"
+                                              x-text="Math.round((item.confidence_score || 0.5) * 100) + '%'"></span>
+                                        <span class="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs" x-text="(item.frequency || 1) + 'x'"></span>
+                                    </div>
+                                </div>
+                                <p x-show="item.error_message" class="text-sm text-gray-400 mb-2 font-mono bg-slate-900/50 p-2 rounded" x-text="item.error_message"></p>
+                                <p x-show="item.context" class="text-xs text-cyan-400 mb-2" x-text="'Contexto: ' + item.context"></p>
+                                <p class="text-green-400"><span class="text-gray-400">Solucao: </span><span x-text="item.solution"></span></p>
+                                <p x-show="item.root_cause" class="text-sm text-gray-400 mt-1" x-text="'Causa: ' + item.root_cause"></p>
+                                <p x-show="item.prevention" class="text-sm text-gray-500 mt-1" x-text="'Prevencao: ' + item.prevention"></p>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Entities -->
+                    <div x-show="!modalLoading && modalType === 'entities'" class="grid md:grid-cols-2 gap-3">
+                        <template x-for="item in modalData" :key="item.id || item.name">
+                            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700 hover:border-orange-500/50 transition-colors">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="text-orange-400 font-medium" x-text="item.name"></span>
+                                    <span class="px-2 py-0.5 bg-orange-500/20 text-orange-400 rounded text-xs" x-text="item.type || 'unknown'"></span>
+                                </div>
+                                <p class="text-sm text-gray-400" x-text="item.description || 'Sem descricao'"></p>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Preferences -->
+                    <div x-show="!modalLoading && modalType === 'preferences'" class="space-y-2">
+                        <template x-for="item in modalData" :key="item.key">
+                            <div class="flex items-center justify-between py-3 px-4 bg-slate-800/50 rounded-lg border border-slate-700 hover:border-pink-500/50 transition-colors">
+                                <span class="text-gray-300" x-text="item.key"></span>
+                                <span class="font-medium text-pink-400" x-text="item.value"></span>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Patterns -->
+                    <div x-show="!modalLoading && modalType === 'patterns'" class="space-y-3">
+                        <template x-for="item in modalData" :key="item.id">
+                            <div class="bg-slate-800/50 rounded-lg p-4 border border-slate-700 hover:border-cyan-500/50 transition-colors">
+                                <div class="flex items-start justify-between mb-2">
+                                    <span class="px-2 py-1 bg-cyan-500/20 text-cyan-400 rounded text-xs" x-text="item.category || 'geral'"></span>
+                                    <span class="px-2 py-0.5 bg-slate-700 text-gray-300 rounded-full text-xs" x-text="(item.frequency || 1) + ' vezes'"></span>
+                                </div>
+                                <p class="text-gray-300" x-text="item.pattern || item.content"></p>
+                            </div>
+                        </template>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="mt-8 text-center text-gray-500 text-sm">
+            <p>Claude Brain v1.0 - Ultima atualizacao: <span x-text="lastUpdate"></span></p>
+        </footer>
+
+        <!-- Error Toast -->
+        <div x-show="error"
+             x-transition
+             class="fixed bottom-4 right-4 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3"
+             role="alert">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <span x-text="error"></span>
+            <button @click="error = ''" class="ml-2 hover:text-red-200" aria-label="Fechar alerta">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8765';
+
+        function dashboard() {
+            return {
+                // State
+                connected: false,
+                loading: false,
+                searching: false,
+                countdown: 30,
+                error: '',
+                lastUpdate: '-',
+
+                // Modal state
+                modalOpen: false,
+                modalType: '',
+                modalTitle: '',
+                modalData: [],
+                modalLoading: false,
+
+                // Data
+                stats: {},
+                effectiveness: { effectiveness_pct: 0 },
+                decisions: [],
+                learnings: [],
+                preferences: {},
+                searchQuery: '',
+                searchResults: [],
+                entityQuery: '',
+                entityGraph: null,
+
+                // Computed stats for cards
+                get statsCards() {
+                    return [
+                        { label: 'Memorias', value: this.stats.memories || 0, icon: '🧠', bgColor: 'bg-blue-500/20', type: 'memories' },
+                        { label: 'Decisoes', value: this.stats.decisions || 0, icon: '✓', bgColor: 'bg-purple-500/20', type: 'decisions' },
+                        { label: 'Learnings', value: this.stats.learnings || 0, icon: '📚', bgColor: 'bg-yellow-500/20', type: 'learnings' },
+                        { label: 'Entidades', value: this.stats.entities || 0, icon: '🔗', bgColor: 'bg-orange-500/20', type: 'entities' },
+                        { label: 'Preferencias', value: this.stats.preferences || 0, icon: '❤️', bgColor: 'bg-pink-500/20', type: 'preferences' },
+                        { label: 'Padroes', value: this.stats.patterns || 0, icon: '📝', bgColor: 'bg-cyan-500/20', type: 'patterns' },
+                    ];
+                },
+
+                // Initialize
+                init() {
+                    this.fetchAll();
+                    this.startAutoRefresh();
+                },
+
+                // Auto refresh timer
+                startAutoRefresh() {
+                    setInterval(() => {
+                        this.countdown--;
+                        if (this.countdown <= 0) {
+                            this.countdown = 30;
+                            this.fetchAll();
+                        }
+                    }, 1000);
+                },
+
+                // Fetch all data
+                async fetchAll() {
+                    this.loading = true;
+                    this.error = '';
+
+                    try {
+                        await Promise.all([
+                            this.fetchStats(),
+                            this.fetchEffectiveness(),
+                            this.fetchDecisions(),
+                            this.fetchLearnings(),
+                            this.fetchPreferences(),
+                        ]);
+
+                        this.connected = true;
+                        this.lastUpdate = new Date().toLocaleTimeString('pt-BR');
+                    } catch (e) {
+                        console.error('Fetch error:', e);
+                        this.connected = false;
+                        this.error = 'Erro ao conectar com a API';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Individual fetchers
+                async fetchStats() {
+                    try {
+                        const res = await fetch(`${API_BASE}/stats`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.stats = data.database || data;
+                        }
+                    } catch (e) {
+                        this.stats = this.getMockStats();
+                    }
+                },
+
+                async fetchEffectiveness() {
+                    try {
+                        const res = await fetch(`${API_BASE}/metrics`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            // API retorna {effectiveness: {...}, daily_report: [...]}
+                            this.effectiveness = data.effectiveness || data;
+                        }
+                    } catch (e) {
+                        this.effectiveness = this.getMockEffectiveness();
+                    }
+                },
+
+                async fetchDecisions() {
+                    try {
+                        const res = await fetch(`${API_BASE}/decisions?limit=10`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.decisions = data.decisions || data;
+                        }
+                    } catch (e) {
+                        this.decisions = this.getMockDecisions();
+                    }
+                },
+
+                async fetchLearnings() {
+                    try {
+                        const res = await fetch(`${API_BASE}/learnings?limit=10`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            // API retorna {count: N, learnings: [...]}
+                            this.learnings = data.learnings || data;
+                        }
+                    } catch (e) {
+                        this.learnings = this.getMockLearnings();
+                    }
+                },
+
+                async fetchPreferences() {
+                    try {
+                        const res = await fetch(`${API_BASE}/preferences`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            // API retorna {count: N, preferences: {...}}
+                            this.preferences = data.preferences || data;
+                        }
+                    } catch (e) {
+                        this.preferences = this.getMockPreferences();
+                    }
+                },
+
+                // Search
+                async performSearch() {
+                    if (!this.searchQuery.trim()) return;
+
+                    this.searching = true;
+                    this.searchResults = [];
+
+                    try {
+                        const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(this.searchQuery)}&limit=5`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            // API retorna {query: "", count: N, results: [...]}
+                            this.searchResults = data.results || data;
+                        }
+                    } catch (e) {
+                        // Mock search results
+                        this.searchResults = this.getMockSearchResults();
+                    } finally {
+                        this.searching = false;
+                    }
+                },
+
+                // Entity Graph
+                async fetchEntityGraph() {
+                    if (!this.entityQuery.trim()) return;
+
+                    try {
+                        const res = await fetch(`${API_BASE}/graph/${encodeURIComponent(this.entityQuery)}`);
+                        if (res.ok) {
+                            this.entityGraph = await res.json();
+                        }
+                    } catch (e) {
+                        this.entityGraph = this.getMockEntityGraph();
+                    }
+                },
+
+                // Detail Modal
+                async openDetailModal(type) {
+                    const titles = {
+                        memories: 'Todas as Memorias',
+                        decisions: 'Todas as Decisoes',
+                        learnings: 'Todos os Learnings',
+                        entities: 'Todas as Entidades',
+                        preferences: 'Todas as Preferencias',
+                        patterns: 'Todos os Padroes'
+                    };
+
+                    this.modalType = type;
+                    this.modalTitle = titles[type] || type;
+                    this.modalOpen = true;
+                    this.modalLoading = true;
+                    this.modalData = [];
+
+                    try {
+                        const endpoints = {
+                            memories: '/memories?limit=100',
+                            decisions: '/decisions?limit=100',
+                            learnings: '/learnings?limit=100',
+                            entities: '/entities?limit=100',
+                            preferences: '/preferences',
+                            patterns: '/patterns?limit=100'
+                        };
+
+                        const res = await fetch(`${API_BASE}${endpoints[type]}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            // Handle different response formats
+                            if (type === 'preferences') {
+                                this.modalData = Object.entries(data.preferences || data).map(([k, v]) => ({ key: k, value: v }));
+                            } else {
+                                this.modalData = data[type] || data.items || data;
+                            }
+                        } else {
+                            this.modalData = this.getMockDetailData(type);
+                        }
+                    } catch (e) {
+                        console.error('Modal fetch error:', e);
+                        this.modalData = this.getMockDetailData(type);
+                    } finally {
+                        this.modalLoading = false;
+                    }
+                },
+
+                closeModal() {
+                    this.modalOpen = false;
+                    this.modalData = [];
+                },
+
+                getMockDetailData(type) {
+                    const mocks = {
+                        memories: [
+                            { id: 1, category: 'technical', content: 'Usuario prefere Docker Compose em vez de K8s', importance: 8, created_at: '2024-01-28' },
+                            { id: 2, category: 'preference', content: 'Slack API tem rate limit de 1 req/sec', importance: 7, created_at: '2024-01-27' },
+                            { id: 3, category: 'discovery', content: 'FAISS index precisa ser recriado quando muda o modelo', importance: 6, created_at: '2024-01-26' }
+                        ],
+                        decisions: this.getMockDecisions(),
+                        learnings: this.getMockLearnings(),
+                        entities: [
+                            { id: 1, name: 'vsl-analysis', type: 'project', description: 'Sistema de ML para VSLs' },
+                            { id: 2, name: 'claude-brain', type: 'project', description: 'Sistema de memoria' },
+                            { id: 3, name: 'FastAPI', type: 'technology', description: 'Framework Python async' },
+                            { id: 4, name: 'Redis', type: 'technology', description: 'Cache em memoria' }
+                        ],
+                        preferences: [
+                            { key: 'idioma', value: 'portugues' },
+                            { key: 'editor', value: 'neovim' },
+                            { key: 'test_framework', value: 'pytest' }
+                        ],
+                        patterns: [
+                            { id: 1, pattern: 'Sempre ativar venv antes de rodar Python', frequency: 15, category: 'workflow' },
+                            { id: 2, pattern: 'Usar sandbox Daytona para execucao', frequency: 12, category: 'security' },
+                            { id: 3, pattern: 'Commit atomico por feature', frequency: 8, category: 'git' }
+                        ]
+                    };
+                    return mocks[type] || [];
+                },
+
+                // Mock data for offline/demo mode
+                getMockStats() {
+                    return {
+                        memories: 42,
+                        decisions: 15,
+                        learnings: 8,
+                        entities: 23,
+                        relations: 31,
+                        preferences: 12,
+                        patterns: 5,
+                        sessions: 3
+                    };
+                },
+
+                getMockEffectiveness() {
+                    return {
+                        total_actions: 156,
+                        rated_actions: 89,
+                        useful: 71,
+                        not_useful: 18,
+                        effectiveness_pct: 79.8,
+                        avg_search_score: 0.72,
+                        by_action: {
+                            search: { total: 98, useful: 62 },
+                            decide: { total: 15, useful: 12 },
+                            learn: { total: 8, useful: 7 },
+                            feedback: { total: 35, useful: 28 }
+                        }
+                    };
+                },
+
+                getMockDecisions() {
+                    return [
+                        { id: 1, project: 'vsl-analysis', decision: 'Usar FastAPI para API REST', reasoning: 'Melhor performance async', status: 'active' },
+                        { id: 2, project: 'claude-brain', decision: 'SQLite para persistencia', reasoning: 'Simplicidade e portabilidade', status: 'active' },
+                        { id: 3, project: 'slack-bot', decision: 'Redis para cache de sessoes', reasoning: 'TTL automatico', status: 'active' }
+                    ];
+                },
+
+                getMockLearnings() {
+                    return [
+                        { id: 1, error_type: 'ModuleNotFoundError', solution: 'Ativar venv antes de rodar', prevention: 'Verificar ambiente', frequency: 5 },
+                        { id: 2, error_type: 'CUDA OOM', solution: 'Reduzir batch size de 32 para 16', prevention: 'Monitorar memoria', frequency: 3 },
+                        { id: 3, error_type: 'TimeoutError', solution: 'Aumentar timeout para 30s', prevention: 'Configurar retry', frequency: 2 }
+                    ];
+                },
+
+                getMockPreferences() {
+                    return {
+                        'idioma': 'portugues',
+                        'editor': 'neovim',
+                        'test_framework': 'pytest',
+                        'container': 'docker-compose',
+                        'modelo_ia': 'opus-4.5'
+                    };
+                },
+
+                getMockSearchResults() {
+                    return [
+                        { source: 'CLAUDE.md', text: 'Resultado de exemplo da busca semantica...', score: 0.85 },
+                        { source: 'decisions.md', text: 'Decisao relacionada a busca...', score: 0.72 },
+                        { source: 'learnings.md', text: 'Aprendizado sobre o tema...', score: 0.58 }
+                    ];
+                },
+
+                getMockEntityGraph() {
+                    return {
+                        entity: { name: this.entityQuery, type: 'project', description: 'Entidade de exemplo' },
+                        outgoing: [
+                            { relation_type: 'uses', to_entity: 'Python' },
+                            { relation_type: 'uses', to_entity: 'SQLite' },
+                            { relation_type: 'depends_on', to_entity: 'FastAPI' }
+                        ],
+                        incoming: []
+                    };
+                }
+            };
+        }
+    </script>
+</body>
+</html>

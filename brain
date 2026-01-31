@@ -1,0 +1,16 @@
+#!/bin/bash
+# Claude Brain - CLI Wrapper
+# Ativa o venv e executa o Python CLI
+
+BRAIN_DIR="/root/claude-brain"
+VENV="$BRAIN_DIR/.venv/bin/activate"
+
+# Usa modelo em cache (evita timeouts)
+export HF_HUB_OFFLINE=1
+export TOKENIZERS_PARALLELISM=false
+
+if [ -f "$VENV" ]; then
+    source "$VENV"
+fi
+
+python3 "$BRAIN_DIR/scripts/brain_cli.py" "$@"

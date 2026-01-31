@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # Claude Brain API Server
+  brain-api:
+    build: .
+    container_name: claude-brain-api
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      # Mount data directories for persistence
+      - ./memory:/app/memory
+      - ./rag:/app/rag
+      - ./logs:/app/logs
+    environment:
+      # Configuration
+      BRAIN_DIR: /app
+      DB_PATH: /app/memory/brain.db
+      RAG_DIR: /app/rag
+      API_HOST: 0.0.0.0
+      API_PORT: 8765
+      LOG_LEVEL: INFO
+
+      # Model settings (offline mode)
+      HF_HUB_OFFLINE: 1
+      TOKENIZERS_PARALLELISM: false
+      EMBEDDING_MODEL: all-MiniLM-L6-v2
+
+      # Feature flags
+      ENABLE_AUTO_REBUILD: "true"
+      ENABLE_METRICS: "true"
+      ENABLE_HOOKS: "true"
+
+    # Resource limits for development
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Healthcheck
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Redis for cache (can be enabled later)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: claude-brain-redis
+  #   ports:
+  #     - "127.0.0.1:6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   restart: unless-stopped
+
+volumes:
+  # redis-data:
+  #   driver: local
+
+networks:
+  default:
+    name: claude-brain-network
+    driver: bridge

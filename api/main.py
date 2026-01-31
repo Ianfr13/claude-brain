@@ -15,8 +15,197 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
 import uvicorn
 import logging
+
+# ============ PYDANTIC MODELS ============
+
+
+class HealthResponse(BaseModel):
+    """Response model for health check endpoint."""
+    status: str = Field(..., description="Status do servico", examples=["online"])
+    service: str = Field(..., description="Nome do servico")
+    version: str = Field(..., description="Versao da API")
+    api_version: str = Field(..., description="Versao do versionamento da API")
+    endpoints: List[str] = Field(..., description="Lista de endpoints disponiveis")
+    dashboard: str = Field(..., description="URL do dashboard")
+
+
+class DatabaseStats(BaseModel):
+    """Stats do banco de dados."""
+    memories: int = Field(0, description="Total de memorias")
+    decisions: int = Field(0, description="Total de decisoes")
+    learnings: int = Field(0, description="Total de aprendizados")
+    entities: int = Field(0, description="Total de entidades")
+    relations: int = Field(0, description="Total de relacoes")
+    preferences: int = Field(0, description="Total de preferencias")
+
+
+class RAGStats(BaseModel):
+    """Stats do sistema RAG/FAISS."""
+    documents: int = Field(0, description="Total de documentos indexados")
+    chunks: int = Field(0, description="Total de chunks")
+    faiss_status: str = Field("desconhecido", description="Status do indice FAISS")
+    last_rebuild: Optional[str] = Field(None, description="Data do ultimo rebuild")
+    is_stale: Optional[bool] = Field(None, description="Se o indice esta obsoleto")
+    auto_rebuild_enabled: Optional[bool] = Field(None, description="Se auto-rebuild esta ativo")
+
+
+class StatsResponse(BaseModel):
+    """Response model for /v1/stats endpoint."""
+    database: Dict[str, Any] = Field(..., description="Estatisticas do banco de dados")
+    rag: Dict[str, Any] = Field(..., description="Estatisticas do sistema RAG")
+
+
+class Decision(BaseModel):
+    """Modelo de uma decisao arquitetural."""
+    id: int = Field(..., description="ID da decisao")
+    decision: str = Field(..., description="Texto da decisao")
+    reason: Optional[str] = Field(None, description="Razao da decisao")
+    project: Optional[str] = Field(None, description="Projeto relacionado")
+    status: str = Field("active", description="Status da decisao")
+    maturity: str = Field("hypothesis", description="Maturidade da decisao")
+    confidence: float = Field(0.5, description="Confianca (0-1)")
+    created_at: str = Field(..., description="Data de criacao")
+
+
+class DecisionsResponse(BaseModel):
+    """Response model for /v1/decisions endpoint."""
+    count: int = Field(..., description="Numero de decisoes retornadas")
+    project: Optional[str] = Field(None, description="Filtro de projeto aplicado")
+    status: str = Field(..., description="Filtro de status aplicado")
+    decisions: List[Dict[str, Any]] = Field(..., description="Lista de decisoes")
+
+
+class Learning(BaseModel):
+    """Modelo de um aprendizado."""
+    id: int = Field(..., description="ID do aprendizado")
+    error_pattern: str = Field(..., description="Padrao de erro")
+    solution: str = Field(..., description="Solucao encontrada")
+    context: Optional[str] = Field(None, description="Contexto do erro")
+    cause: Optional[str] = Field(None, description="Causa raiz")
+    prevention: Optional[str] = Field(None, description="Como prevenir")
+    project: Optional[str] = Field(None, description="Projeto relacionado")
+    maturity: str = Field("hypothesis", description="Maturidade")
+    confidence: float = Field(0.5, description="Confianca (0-1)")
+    use_count: int = Field(0, description="Vezes que foi usado")
+    created_at: str = Field(..., description="Data de criacao")
+
+
+class LearningsResponse(BaseModel):
+    """Response model for /v1/learnings endpoint."""
+    count: int = Field(..., description="Numero de aprendizados retornados")
+    learnings: List[Dict[str, Any]] = Field(..., description="Lista de aprendizados")
+
+
+class Preference(BaseModel):
+    """Modelo de uma preferencia."""
+    id: int = Field(..., description="ID da preferencia")
+    key: str = Field(..., description="Chave da preferencia")
+    value: str = Field(..., description="Valor da preferencia")
+    confidence: float = Field(0.5, description="Confianca (0-1)")
+    source: str = Field("inferred", description="Origem (inferred, explicit)")
+    created_at: str = Field(..., description="Data de criacao")
+
+
+class PreferencesResponse(BaseModel):
+    """Response model for /v1/preferences endpoint."""
+    count: int = Field(..., description="Numero de preferencias retornadas")
+    min_confidence: float = Field(..., description="Filtro de confianca minima")
+    preferences: List[Dict[str, Any]] = Field(..., description="Lista de preferencias")
+
+
+class MetricsResponse(BaseModel):
+    """Response model for /v1/metrics endpoint."""
+    effectiveness: Dict[str, Any] = Field(..., description="Metricas de eficacia")
+    daily_report: List[Dict[str, Any]] = Field(..., description="Relatorio diario")
+
+
+class SearchResult(BaseModel):
+    """Modelo de um resultado de busca semantica."""
+    chunk_id: str = Field(..., description="ID do chunk")
+    score: float = Field(..., description="Score de similaridade")
+    text: str = Field(..., description="Texto do chunk")
+    source: str = Field(..., description="Arquivo fonte")
+    doc_type: str = Field(..., description="Tipo do documento")
+
+
+class SearchResponse(BaseModel):
+    """Response model for /v1/search endpoint."""
+    query: str = Field(..., description="Query de busca")
+    doc_type: Optional[str] = Field(None, description="Filtro de tipo aplicado")
+    count: int = Field(..., description="Numero de resultados")
+    results: List[Dict[str, Any]] = Field(..., description="Resultados da busca")
+
+
+class MemoryFilters(BaseModel):
+    """Filtros aplicados na busca de memorias."""
+    query: Optional[str] = Field(None, description="Query de busca")
+    type: Optional[str] = Field(None, description="Tipo de memoria")
+    category: Optional[str] = Field(None, description="Categoria")
+    min_importance: int = Field(0, description="Importancia minima")
+
+
+class MemoriesResponse(BaseModel):
+    """Response model for /v1/memories endpoint."""
+    count: int = Field(..., description="Numero de memorias retornadas")
+    filters: MemoryFilters = Field(..., description="Filtros aplicados")
+    memories: List[Dict[str, Any]] = Field(..., description="Lista de memorias")
+
+
+class Entity(BaseModel):
+    """Modelo de uma entidade do knowledge graph."""
+    id: int = Field(..., description="ID da entidade")
+    name: str = Field(..., description="Nome da entidade")
+    type: str = Field(..., description="Tipo (project, technology, etc)")
+    properties: Optional[Dict[str, Any]] = Field(None, description="Propriedades")
+    created_at: str = Field(..., description="Data de criacao")
+
+
+class EntitiesResponse(BaseModel):
+    """Response model for /v1/entities endpoint."""
+    count: int = Field(..., description="Numero de entidades retornadas")
+    type_filter: Optional[str] = Field(None, description="Filtro de tipo aplicado")
+    entities: List[Dict[str, Any]] = Field(..., description="Lista de entidades")
+
+
+class Pattern(BaseModel):
+    """Modelo de um padrao de codigo."""
+    id: int = Field(..., description="ID do padrao")
+    pattern_type: str = Field(..., description="Tipo do padrao")
+    name: str = Field(..., description="Nome do padrao")
+    description: Optional[str] = Field(None, description="Descricao")
+    code_example: Optional[str] = Field(None, description="Exemplo de codigo")
+    created_at: str = Field(..., description="Data de criacao")
+
+
+class PatternsResponse(BaseModel):
+    """Response model for /v1/patterns endpoint."""
+    count: int = Field(..., description="Numero de padroes retornados")
+    type_filter: Optional[str] = Field(None, description="Filtro de tipo aplicado")
+    patterns: List[Dict[str, Any]] = Field(..., description="Lista de padroes")
+
+
+class Relation(BaseModel):
+    """Modelo de uma relacao no knowledge graph."""
+    id: int = Field(..., description="ID da relacao")
+    from_entity: str = Field(..., description="Entidade de origem")
+    to_entity: str = Field(..., description="Entidade de destino")
+    relation_type: str = Field(..., description="Tipo da relacao")
+
+
+class GraphResponse(BaseModel):
+    """Response model for /v1/graph/{entity} endpoint."""
+    entity: Dict[str, Any] = Field(..., description="Dados da entidade")
+    outgoing: List[Dict[str, Any]] = Field(..., description="Relacoes de saida")
+    incoming: List[Dict[str, Any]] = Field(..., description="Relacoes de entrada")
+
+
+class ErrorResponse(BaseModel):
+    """Response model for error responses."""
+    detail: str = Field(..., description="Mensagem de erro")
+
 
 # Rate limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -107,8 +296,8 @@ app.add_middleware(
 # ============ ENDPOINTS ============
 
 
-@app.get("/", tags=["Health"])
-def root():
+@app.get("/", tags=["Health"], response_model=HealthResponse)
+def root() -> HealthResponse:
     """Health check e info basica da API"""
     return {
         "status": "online",
@@ -131,9 +320,9 @@ def root():
     }
 
 
-@app.get("/v1/stats", tags=["Stats"])
+@app.get("/v1/stats", tags=["Stats"], response_model=StatsResponse)
 @limiter.limit("60/minute")
-def get_stats(request: Request):
+def get_stats(request: Request) -> StatsResponse:
     """
     Retorna estatisticas gerais do brain.
 
@@ -152,12 +341,12 @@ def get_stats(request: Request):
         raise _handle_error(e, "stats")
 
 
-@app.get("/v1/decisions", tags=["Memory"])
+@app.get("/v1/decisions", tags=["Memory"], response_model=DecisionsResponse)
 def list_decisions(
     project: Optional[str] = Query(None, description="Filtrar por projeto"),
     status: str = Query("active", description="Status das decisoes (active, deprecated, etc)"),
     limit: int = Query(20, ge=1, le=100, description="Numero maximo de resultados"),
-):
+) -> DecisionsResponse:
     """
     Lista decisoes arquiteturais armazenadas.
 
@@ -176,10 +365,10 @@ def list_decisions(
         raise _handle_error(e, "decisions")
 
 
-@app.get("/v1/learnings", tags=["Memory"])
+@app.get("/v1/learnings", tags=["Memory"], response_model=LearningsResponse)
 def list_learnings(
     limit: int = Query(20, ge=1, le=100, description="Numero maximo de resultados"),
-):
+) -> LearningsResponse:
     """
     Lista aprendizados de erros.
 
@@ -196,10 +385,10 @@ def list_learnings(
         raise _handle_error(e, "learnings")
 
 
-@app.get("/v1/preferences", tags=["Memory"])
+@app.get("/v1/preferences", tags=["Memory"], response_model=PreferencesResponse)
 def list_preferences(
     min_confidence: float = Query(0.3, ge=0.0, le=1.0, description="Confianca minima"),
-):
+) -> PreferencesResponse:
     """
     Lista preferencias do usuario.
 
@@ -217,10 +406,10 @@ def list_preferences(
         raise _handle_error(e, "preferences")
 
 
-@app.get("/v1/metrics", tags=["Metrics"])
+@app.get("/v1/metrics", tags=["Metrics"], response_model=MetricsResponse)
 def get_metrics(
     days: int = Query(7, ge=1, le=30, description="Numero de dias para relatorio diario"),
-):
+) -> MetricsResponse:
     """
     Retorna metricas de eficacia do brain.
 
@@ -239,14 +428,14 @@ def get_metrics(
         raise _handle_error(e, "metrics")
 
 
-@app.get("/v1/search", tags=["Search"])
+@app.get("/v1/search", tags=["Search"], response_model=SearchResponse)
 @limiter.limit("30/minute")
 def search(
     request: Request,
     q: str = Query(..., min_length=2, description="Query de busca"),
     doc_type: Optional[str] = Query(None, description="Filtrar por tipo de documento"),
     limit: int = Query(5, ge=1, le=20, description="Numero maximo de resultados"),
-):
+) -> SearchResponse:
     """
     Busca semantica nos documentos indexados.
 
@@ -266,14 +455,14 @@ def search(
         raise _handle_error(e, "search")
 
 
-@app.get("/v1/memories", tags=["Memory"])
+@app.get("/v1/memories", tags=["Memory"], response_model=MemoriesResponse)
 def search_in_memories(
     q: Optional[str] = Query(None, description="Query de busca"),
     type: Optional[str] = Query(None, description="Tipo de memoria"),
     category: Optional[str] = Query(None, description="Categoria"),
     min_importance: int = Query(0, ge=0, le=10, description="Importancia minima"),
     limit: int = Query(10, ge=1, le=50, description="Numero maximo de resultados"),
-):
+) -> MemoriesResponse:
     """
     Busca nas memorias do banco SQLite.
 
@@ -303,11 +492,11 @@ def search_in_memories(
         raise _handle_error(e, "memories")
 
 
-@app.get("/v1/entities", tags=["Knowledge Graph"])
+@app.get("/v1/entities", tags=["Knowledge Graph"], response_model=EntitiesResponse)
 def list_entities(
     type: Optional[str] = Query(None, description="Filtrar por tipo (project, technology, etc)"),
     limit: int = Query(100, ge=1, le=200, description="Numero maximo de resultados"),
-):
+) -> EntitiesResponse:
     """
     Lista todas as entidades do knowledge graph.
     """
@@ -322,11 +511,11 @@ def list_entities(
         raise _handle_error(e, "entities")
 
 
-@app.get("/v1/patterns", tags=["Memory"])
+@app.get("/v1/patterns", tags=["Memory"], response_model=PatternsResponse)
 def list_patterns(
     type: Optional[str] = Query(None, description="Filtrar por tipo de pattern"),
     limit: int = Query(100, ge=1, le=200, description="Numero maximo de resultados"),
-):
+) -> PatternsResponse:
     """
     Lista todos os padrões de código salvos.
     """
@@ -341,9 +530,14 @@ def list_patterns(
         raise _handle_error(e, "patterns")
 
 
-@app.get("/v1/graph/{entity}", tags=["Knowledge Graph"])
+@app.get(
+    "/v1/graph/{entity}",
+    tags=["Knowledge Graph"],
+    response_model=GraphResponse,
+    responses={404: {"model": ErrorResponse, "description": "Entidade nao encontrada"}},
+)
 @limiter.limit("30/minute")
-def get_graph(request: Request, entity: str):
+def get_graph(request: Request, entity: str) -> GraphResponse:
     """
     Retorna knowledge graph de uma entidade.
 

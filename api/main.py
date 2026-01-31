@@ -114,19 +114,24 @@ def root():
         "status": "online",
         "service": "Claude Brain API",
         "version": "1.0.0",
+        "api_version": "v1",
         "endpoints": [
-            "/stats",
-            "/decisions",
-            "/learnings",
-            "/preferences",
-            "/metrics",
-            "/search",
-            "/graph/{entity}",
+            "/v1/stats",
+            "/v1/decisions",
+            "/v1/learnings",
+            "/v1/preferences",
+            "/v1/metrics",
+            "/v1/search",
+            "/v1/memories",
+            "/v1/entities",
+            "/v1/patterns",
+            "/v1/graph/{entity}",
         ],
+        "dashboard": "/dashboard",
     }
 
 
-@app.get("/stats", tags=["Stats"])
+@app.get("/v1/stats", tags=["Stats"])
 @limiter.limit("60/minute")
 def get_stats(request: Request):
     """
@@ -147,7 +152,7 @@ def get_stats(request: Request):
         raise _handle_error(e, "stats")
 
 
-@app.get("/decisions", tags=["Memory"])
+@app.get("/v1/decisions", tags=["Memory"])
 def list_decisions(
     project: Optional[str] = Query(None, description="Filtrar por projeto"),
     status: str = Query("active", description="Status das decisoes (active, deprecated, etc)"),
@@ -171,7 +176,7 @@ def list_decisions(
         raise _handle_error(e, "decisions")
 
 
-@app.get("/learnings", tags=["Memory"])
+@app.get("/v1/learnings", tags=["Memory"])
 def list_learnings(
     limit: int = Query(20, ge=1, le=100, description="Numero maximo de resultados"),
 ):
@@ -191,7 +196,7 @@ def list_learnings(
         raise _handle_error(e, "learnings")
 
 
-@app.get("/preferences", tags=["Memory"])
+@app.get("/v1/preferences", tags=["Memory"])
 def list_preferences(
     min_confidence: float = Query(0.3, ge=0.0, le=1.0, description="Confianca minima"),
 ):
@@ -212,7 +217,7 @@ def list_preferences(
         raise _handle_error(e, "preferences")
 
 
-@app.get("/metrics", tags=["Metrics"])
+@app.get("/v1/metrics", tags=["Metrics"])
 def get_metrics(
     days: int = Query(7, ge=1, le=30, description="Numero de dias para relatorio diario"),
 ):
@@ -234,7 +239,7 @@ def get_metrics(
         raise _handle_error(e, "metrics")
 
 
-@app.get("/search", tags=["Search"])
+@app.get("/v1/search", tags=["Search"])
 @limiter.limit("30/minute")
 def search(
     request: Request,
@@ -261,7 +266,7 @@ def search(
         raise _handle_error(e, "search")
 
 
-@app.get("/memories", tags=["Memory"])
+@app.get("/v1/memories", tags=["Memory"])
 def search_in_memories(
     q: Optional[str] = Query(None, description="Query de busca"),
     type: Optional[str] = Query(None, description="Tipo de memoria"),
@@ -298,7 +303,7 @@ def search_in_memories(
         raise _handle_error(e, "memories")
 
 
-@app.get("/entities", tags=["Knowledge Graph"])
+@app.get("/v1/entities", tags=["Knowledge Graph"])
 def list_entities(
     type: Optional[str] = Query(None, description="Filtrar por tipo (project, technology, etc)"),
     limit: int = Query(100, ge=1, le=200, description="Numero maximo de resultados"),
@@ -317,7 +322,7 @@ def list_entities(
         raise _handle_error(e, "entities")
 
 
-@app.get("/patterns", tags=["Memory"])
+@app.get("/v1/patterns", tags=["Memory"])
 def list_patterns(
     type: Optional[str] = Query(None, description="Filtrar por tipo de pattern"),
     limit: int = Query(100, ge=1, le=200, description="Numero maximo de resultados"),
@@ -336,7 +341,7 @@ def list_patterns(
         raise _handle_error(e, "patterns")
 
 
-@app.get("/graph/{entity}", tags=["Knowledge Graph"])
+@app.get("/v1/graph/{entity}", tags=["Knowledge Graph"])
 @limiter.limit("30/minute")
 def get_graph(request: Request, entity: str):
     """

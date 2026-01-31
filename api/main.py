@@ -10,14 +10,22 @@ from pathlib import Path
 # Adiciona scripts ao path para imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from typing import Optional, List, Dict, Any
 import uvicorn
 import logging
 
+# Rate limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
 logger = logging.getLogger(__name__)
+
+# Rate limiter configuration
+limiter = Limiter(key_func=get_remote_address)
 
 # Imports dos modulos do brain
 from memory_store import (
@@ -46,6 +54,10 @@ app = FastAPI(
     description="API REST para o sistema de memoria inteligente Claude Brain",
     version="1.0.0",
 )
+
+# Attach rate limiter to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Configura CORS para frontend (restrito a localhost por seguranca)
 app.add_middleware(
@@ -80,7 +92,8 @@ def root():
 
 
 @app.get("/stats", tags=["Stats"])
-def get_stats():
+@limiter.limit("60/minute")
+def get_stats(request: Request):
     """
     Retorna estatisticas gerais do brain.
 
@@ -187,7 +200,9 @@ def get_metrics(
 
 
 @app.get("/search", tags=["Search"])
+@limiter.limit("30/minute")
 def search(
+    request: Request,
     q: str = Query(..., min_length=2, description="Query de busca"),
     doc_type: Optional[str] = Query(None, description="Filtrar por tipo de documento"),
     limit: int = Query(5, ge=1, le=20, description="Numero maximo de resultados"),
@@ -287,7 +302,8 @@ def list_patterns(
 
 
 @app.get("/graph/{entity}", tags=["Knowledge Graph"])
-def get_graph(entity: str):
+@limiter.limit("30/minute")
+def get_graph(request: Request, entity: str):
     """
     Retorna knowledge graph de uma entidade.
 
@@ -323,13 +339,6 @@ def dashboard():
 
 
 # ============ MAIN ============
-
-# TODO: Adicionar rate limiting com slowapi para proteger contra abuso
-# from slowapi import Limiter, _rate_limit_exceeded_handler
-# from slowapi.util import get_remote_address
-# limiter = Limiter(key_func=get_remote_address)
-# app.state.limiter = limiter
-# Exemplo: @limiter.limit("10/minute") nos endpoints
 
 if __name__ == "__main__":
     uvicorn.run(

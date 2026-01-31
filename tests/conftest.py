@@ -93,9 +93,14 @@ def temp_db(tmp_path: Path, monkeypatch) -> Generator[Path, None, None]:
     db_dir.mkdir(parents=True, exist_ok=True)
     db_path = db_dir / "brain.db"
 
-    # Patch no módulo memory_store ANTES de usar
+    # Patch no módulo BASE onde get_db() realmente usa DB_PATH
+    # IMPORTANTE: memory_store re-exporta DB_PATH, mas get_db() usa
+    # o valor de scripts.memory.base.DB_PATH diretamente
+    import scripts.memory.base as memory_base
     import memory_store
-    monkeypatch.setattr(memory_store, "DB_PATH", db_path)
+
+    monkeypatch.setattr(memory_base, "DB_PATH", db_path)
+    monkeypatch.setattr(memory_store, "DB_PATH", db_path)  # Para consistência
 
     # Inicializa o banco com schema completo
     memory_store.init_db()

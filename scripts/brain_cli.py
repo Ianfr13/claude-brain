@@ -110,7 +110,27 @@ def print_info(text: str):
 # ============ COMANDOS DE MEMÓRIA ============
 
 def cmd_remember(args):
-    """Salva uma memória geral"""
+    """Salva uma memoria geral no banco de dados.
+
+    Memorias sao informacoes gerais que nao se encaixam em decisoes
+    ou aprendizados. Podem ser preferencias, fatos, observacoes, etc.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - text (list[str]): Texto da memoria a ser salva
+            - category (str, optional): Categoria (default: "general")
+            - importance (int, optional): Importancia 1-10 (default: 5)
+
+    Returns:
+        None. Imprime mensagem de sucesso com ID ou erro.
+
+    Examples:
+        $ brain remember "Usuario prefere respostas em portugues"
+        ✓ Memoria salva (ID: 1)
+
+        $ brain remember "API do Slack tem rate limit" -c apis -i 8
+        ✓ Memoria salva (ID: 2)
+    """
     if not args.text:
         print_error("Uso: brain remember <texto>")
         return
@@ -124,7 +144,29 @@ def cmd_remember(args):
 
 
 def cmd_decide(args):
-    """Salva uma decisão arquitetural"""
+    """Salva uma decisao arquitetural no banco de dados.
+
+    Decisoes sao escolhas tecnicas importantes que afetam o projeto,
+    como escolha de tecnologias, padroes de design, etc.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - decision (list[str]): Texto da decisao
+            - project (str, optional): Nome do projeto
+            - reason (str, optional): Justificativa da decisao
+            - alternatives (str, optional): Alternativas consideradas
+            - fact (bool): Se True, marca como fato ja confirmado
+
+    Returns:
+        None. Imprime sucesso com ID e status (hipotese/fato).
+
+    Examples:
+        $ brain decide "Usar FastAPI para API REST" -p meu-projeto
+        ✓ Decisao salva (ID: 1) ○ como hipotese
+
+        $ brain decide "Python 3.12 e a versao minima" --fact
+        ✓ Fato salvo (ID: 2) ✓ ja confirmado
+    """
     if not args.decision:
         print_error("Uso: brain decide <decisão> [--project X] [--reason Y] [--fact]")
         return
@@ -148,7 +190,32 @@ def cmd_decide(args):
 
 
 def cmd_learn(args):
-    """Salva um aprendizado de erro"""
+    """Salva um aprendizado de erro/solucao no banco de dados.
+
+    Learnings sao pares erro-solucao que permitem ao brain lembrar
+    como resolver problemas que ja foram enfrentados antes.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - error (list[str]): Tipo/nome do erro
+            - solution (str): Solucao aplicada (obrigatorio)
+            - context (str, optional): O que estava fazendo
+            - cause (str, optional): Causa raiz do erro
+            - prevention (str, optional): Como evitar no futuro
+            - project (str, optional): Projeto relacionado
+            - message (str, optional): Mensagem de erro completa
+            - fact (bool): Se True, marca como solucao ja confirmada
+
+    Returns:
+        None. Imprime sucesso com ID e status (hipotese/fato).
+
+    Examples:
+        $ brain learn "ModuleNotFoundError" -s "pip install torch"
+        ✓ Aprendizado salvo (ID: 1) ○ como hipotese
+
+        $ brain learn "CUDA OOM" -s "Reduzir batch size" -c "Treinando modelo"
+        ✓ Aprendizado salvo (ID: 2) ○ como hipotese
+    """
     if not args.error or not args.solution:
         print_error("Uso: brain learn <erro> --solution <solução> [-c contexto] [--cause causa] [--fact]")
         return
@@ -175,7 +242,28 @@ def cmd_learn(args):
 
 
 def cmd_solve(args):
-    """Busca solução para um erro"""
+    """Busca solucao para um erro no banco de learnings.
+
+    Pesquisa nos aprendizados salvos para encontrar solucoes
+    conhecidas para o erro especificado.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - error (list[str]): Tipo ou mensagem de erro
+
+    Returns:
+        None. Imprime solucao encontrada ou mensagem de nao encontrado.
+
+    Examples:
+        $ brain solve "ModuleNotFoundError torch"
+        Solucao Encontrada
+        Erro: ModuleNotFoundError
+        Solucao: pip install torch
+        Frequencia: 3 ocorrencias
+
+        $ brain solve "erro desconhecido"
+        ℹ Nenhuma solucao encontrada para este erro.
+    """
     if not args.error:
         print_error("Uso: brain solve <erro>")
         return
@@ -195,7 +283,30 @@ def cmd_solve(args):
 
 
 def cmd_recall(args):
-    """Busca na memória"""
+    """Busca na memoria por texto ou tipo.
+
+    Pesquisa nas memorias salvas usando correspondencia de texto
+    e filtros opcionais por tipo.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - query (list[str], optional): Texto para buscar
+            - type (str, optional): Filtrar por tipo de memoria
+            - limit (int, optional): Limite de resultados (default: 10)
+
+    Returns:
+        None. Imprime lista de memorias encontradas.
+
+    Examples:
+        $ brain recall "preferencia"
+        Memorias (3 resultados)
+        [general] ★★★★★
+          Usuario prefere respostas em portugues...
+
+        $ brain recall -t decision -l 5
+        Memorias (5 resultados)
+        ...
+    """
     query = " ".join(args.query) if args.query else None
     results = search_memories(
         query=query,
@@ -217,7 +328,29 @@ def cmd_recall(args):
 
 
 def cmd_decisions(args):
-    """Lista decisões"""
+    """Lista decisoes arquiteturais salvas.
+
+    Exibe todas as decisoes registradas, opcionalmente filtradas
+    por projeto, mostrando status e justificativa.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - project (str, optional): Filtrar por projeto
+            - limit (int, optional): Limite de resultados (default: 10)
+
+    Returns:
+        None. Imprime lista de decisoes com status e data.
+
+    Examples:
+        $ brain decisions
+        Decisoes Arquiteturais
+        [meu-projeto] Usar FastAPI para API REST
+          Razao: Suporte async nativo
+          Status: active | 2024-01-15
+
+        $ brain decisions -p vsl-analysis -l 5
+        ...
+    """
     decisions = get_decisions(project=args.project, limit=args.limit or 10)
 
     if not decisions:
@@ -235,7 +368,29 @@ def cmd_decisions(args):
 
 
 def cmd_learnings(args):
-    """Lista aprendizados"""
+    """Lista aprendizados de erros salvos.
+
+    Exibe todos os pares erro-solucao registrados, mostrando
+    contexto, causa raiz e frequencia de ocorrencia.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - limit (int, optional): Limite de resultados (default: 10)
+
+    Returns:
+        None. Imprime lista de learnings com frequencia.
+
+    Examples:
+        $ brain learnings
+        Aprendizados de Erros
+        ModuleNotFoundError (3x)
+          Contexto: Iniciando projeto novo
+          Solucao: pip install <pacote>
+          Prevencao: requirements.txt atualizado
+
+        $ brain learnings -l 5
+        ...
+    """
     learnings = get_all_learnings(limit=args.limit or 10)
 
     if not learnings:
@@ -258,7 +413,31 @@ def cmd_learnings(args):
 # ============ COMANDOS DE RAG ============
 
 def cmd_index(args):
-    """Indexa arquivo ou diretório"""
+    """Indexa arquivo ou diretorio para busca semantica.
+
+    Processa arquivos de texto/codigo e cria embeddings para
+    permitir busca semantica posterior via brain search.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - path (list[str]): Caminho do arquivo ou diretorio
+            - no_recursive (bool): Nao indexar subdiretorios
+
+    Returns:
+        None. Imprime progresso e total de chunks indexados.
+
+    Examples:
+        $ brain index /root/meu-projeto
+        ℹ Indexando diretorio: /root/meu-projeto
+        ✓ Indexados: 42 arquivos
+
+        $ brain index README.md
+        ℹ Indexando arquivo: README.md
+        ✓ Indexado: 5 chunks
+
+    Notes:
+        Apenas paths permitidos podem ser indexados (seguranca).
+    """
     if not args.path:
         print_error("Uso: brain index <arquivo|diretório>")
         return
@@ -294,7 +473,29 @@ def cmd_index(args):
 
 
 def cmd_search(args):
-    """Busca semântica"""
+    """Busca semantica nos documentos indexados.
+
+    Usa embeddings e FAISS para encontrar documentos semanticamente
+    similares a query, independente de palavras-chave exatas.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - query (list[str]): Texto da busca
+            - type (str, optional): Filtrar por tipo de documento
+            - limit (int, optional): Limite de resultados (default: 5)
+
+    Returns:
+        None. Imprime resultados com score de similaridade.
+
+    Examples:
+        $ brain search "como configurar autenticacao"
+        Resultados para: 'como configurar autenticacao'
+        [0.85] auth/README.md
+          Configure o JWT secret em .env...
+
+        $ brain search "deploy docker" -l 10
+        ...
+    """
     if not args.query:
         print_error("Uso: brain search <query>")
         return
@@ -322,7 +523,27 @@ def cmd_search(args):
 
 
 def cmd_context(args):
-    """Retorna contexto para Claude"""
+    """Retorna contexto formatado para injecao no Claude.
+
+    Busca e formata contexto relevante para ser usado
+    como input adicional em conversas com o Claude.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - query (list[str]): Texto da busca
+            - tokens (int, optional): Limite de tokens (default: 2000)
+
+    Returns:
+        None. Imprime contexto formatado ou mensagem de vazio.
+
+    Examples:
+        $ brain context "deploy kubernetes"
+        # Contexto relevante:
+        ...documentos sobre kubernetes...
+
+        $ brain context "api rest" --tokens 1000
+        ...
+    """
     if not args.query:
         print_error("Uso: brain context <query>")
         return
@@ -337,7 +558,30 @@ def cmd_context(args):
 
 
 def cmd_ask(args):
-    """Consulta inteligente ao brain - combina busca semantica + decisoes + learnings"""
+    """Consulta inteligente que combina todas as fontes.
+
+    Busca em learnings, decisoes e documentos para fornecer
+    a melhor resposta possivel para a duvida do usuario.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - query (list[str]): Pergunta ou duvida
+
+    Returns:
+        None. Imprime resultados de todas as fontes relevantes.
+
+    Examples:
+        $ brain ask "como resolver ModuleNotFoundError"
+        SOLUCAO CONHECIDA: ✓ 85%
+           Erro: ModuleNotFoundError
+           Solucao: pip install <pacote>
+
+        DECISOES RELACIONADAS:
+           ○ 50% Usar venv para isolar dependencias
+
+        $ brain ask "qual banco de dados usar"
+        ...
+    """
     if not args.query:
         print_error("Uso: brain ask <pergunta>")
         return
@@ -396,7 +640,26 @@ def cmd_ask(args):
 
 
 def cmd_related(args):
-    """Encontra documentos relacionados (busca por similaridade de conteúdo)"""
+    """Encontra documentos relacionados por similaridade.
+
+    Busca documentos semanticamente similares ao arquivo
+    especificado, util para descobrir dependencias.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - source (list[str]): Caminho do arquivo fonte
+            - limit (int, optional): Limite de resultados (default: 5)
+
+    Returns:
+        None. Imprime lista de documentos relacionados com score.
+
+    Examples:
+        $ brain related auth/login.py
+        Documentos relacionados a: auth/login.py
+          [0.82] auth/jwt.py
+          [0.75] tests/test_auth.py
+          [0.68] docs/AUTH.md
+    """
     if not args.source:
         print_error("Uso: brain related <arquivo>")
         return
@@ -422,7 +685,25 @@ def cmd_related(args):
 # ============ KNOWLEDGE GRAPH ============
 
 def cmd_entity(args):
-    """Gerencia entidades"""
+    """Cria ou atualiza uma entidade no knowledge graph.
+
+    Entidades sao nos do grafo que representam projetos,
+    tecnologias, pessoas, conceitos, etc.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - name (list[str]): Nome, tipo e descricao da entidade
+
+    Returns:
+        None. Imprime confirmacao de salvamento.
+
+    Examples:
+        $ brain entity redis technology "Cache em memoria"
+        ✓ Entidade 'redis' (technology) salva
+
+        $ brain entity vsl-analysis project "Sistema de analise de VSL"
+        ✓ Entidade 'vsl-analysis' (project) salva
+    """
     if not args.name:
         print_error("Uso: brain entity <nome> <tipo> [descrição]")
         return
@@ -436,7 +717,25 @@ def cmd_entity(args):
 
 
 def cmd_relate(args):
-    """Cria relação entre entidades"""
+    """Cria relacao entre duas entidades no knowledge graph.
+
+    Relacoes conectam entidades, como "projeto usa tecnologia"
+    ou "pessoa trabalha em projeto".
+
+    Args:
+        args: Namespace do argparse contendo:
+            - relation (list[str]): [origem, destino, tipo_relacao]
+
+    Returns:
+        None. Imprime confirmacao da relacao criada.
+
+    Examples:
+        $ brain relate vsl-analysis pytorch uses
+        ✓ Relacao: vsl-analysis --[uses]--> pytorch
+
+        $ brain relate joao meu-projeto maintains
+        ✓ Relacao: joao --[maintains]--> meu-projeto
+    """
     if not args.relation or len(args.relation) < 3:
         print_error("Uso: brain relate <de> <para> <tipo>")
         return
@@ -447,7 +746,30 @@ def cmd_relate(args):
 
 
 def cmd_graph(args):
-    """Mostra grafo de uma entidade"""
+    """Mostra o grafo de relacoes de uma entidade.
+
+    Exibe todas as relacoes de entrada e saida de uma
+    entidade no knowledge graph.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - entity (list[str]): Nome da entidade
+
+    Returns:
+        None. Imprime grafo com relacoes de entrada/saida.
+
+    Examples:
+        $ brain graph vsl-analysis
+        vsl-analysis (project)
+          Analise automatica de VSL
+
+        Relacoes de saida:
+          → [uses] pytorch
+          → [uses] fastapi
+
+        Relacoes de entrada:
+          ← [maintains] joao
+    """
     if not args.entity:
         print_error("Uso: brain graph <entidade>")
         return
@@ -479,7 +801,25 @@ def cmd_graph(args):
 # ============ PREFERÊNCIAS ============
 
 def cmd_prefer(args):
-    """Salva uma preferência"""
+    """Salva uma preferencia do usuario.
+
+    Preferencias sao configuracoes de comportamento como
+    idioma, framework preferido, estilo de codigo, etc.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - pref (list[str]): [chave, valor]
+
+    Returns:
+        None. Imprime confirmacao de salvamento.
+
+    Examples:
+        $ brain prefer idioma portugues
+        ✓ Preferencia salva: idioma = portugues
+
+        $ brain prefer test_framework pytest
+        ✓ Preferencia salva: test_framework = pytest
+    """
     if not args.pref or len(args.pref) < 2:
         print_error("Uso: brain prefer <chave> <valor>")
         return
@@ -491,7 +831,24 @@ def cmd_prefer(args):
 
 
 def cmd_prefs(args):
-    """Lista preferências"""
+    """Lista todas as preferencias conhecidas.
+
+    Exibe as preferencias do usuario salvas no banco,
+    filtradas por nivel minimo de confianca.
+
+    Args:
+        args: Namespace do argparse (sem argumentos especificos)
+
+    Returns:
+        None. Imprime lista de preferencias chave=valor.
+
+    Examples:
+        $ brain prefs
+        Preferencias Conhecidas
+          idioma: portugues
+          test_framework: pytest
+          editor: vscode
+    """
     prefs = get_all_preferences(min_confidence=0.3)
 
     if not prefs:
@@ -506,7 +863,26 @@ def cmd_prefs(args):
 # ============ PADRÕES DE CÓDIGO ============
 
 def cmd_pattern(args):
-    """Salva um padrão de código"""
+    """Salva um padrao/snippet de codigo reutilizavel.
+
+    Patterns sao trechos de codigo que podem ser
+    recuperados rapidamente via brain snippet.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - pattern (list[str]): [nome, codigo]
+            - language (str, optional): Linguagem do codigo
+
+    Returns:
+        None. Imprime confirmacao de salvamento.
+
+    Examples:
+        $ brain pattern fastapi-route "@app.get('/') def root(): return {}"
+        ✓ Padrao 'fastapi-route' salvo
+
+        $ brain pattern pytest-fixture "..." --language python
+        ✓ Padrao 'pytest-fixture' salvo
+    """
     if not args.pattern or len(args.pattern) < 2:
         print_error("Uso: brain pattern <nome> <código>")
         return
@@ -518,7 +894,27 @@ def cmd_pattern(args):
 
 
 def cmd_snippet(args):
-    """Busca um padrão de código"""
+    """Recupera um padrao/snippet de codigo salvo.
+
+    Busca e imprime o codigo de um pattern salvo
+    anteriormente via brain pattern.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - name (list[str]): Nome do pattern
+
+    Returns:
+        None. Imprime codigo do pattern ou erro.
+
+    Examples:
+        $ brain snippet fastapi-route
+        @app.get('/')
+        def root():
+            return {}
+
+        $ brain snippet inexistente
+        ✗ Padrao nao encontrado: inexistente
+    """
     if not args.name:
         print_error("Uso: brain snippet <nome>")
         return
@@ -533,13 +929,56 @@ def cmd_snippet(args):
 # ============ UTILIDADES ============
 
 def cmd_export(args):
-    """Exporta contexto para Claude"""
+    """Exporta todo o contexto do brain em formato texto.
+
+    Gera um dump completo de decisoes, learnings e memorias
+    para backup ou injecao em sessao do Claude.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - project (str, optional): Filtrar por projeto
+
+    Returns:
+        None. Imprime contexto completo formatado.
+
+    Examples:
+        $ brain export
+        # Contexto do Claude Brain
+        ## Decisoes
+        ...
+
+        $ brain export -p vsl-analysis > contexto.md
+        # Salva em arquivo
+    """
     context = export_context(project=args.project, include_learnings=True)
     print(context)
 
 
 def cmd_stats(args):
-    """Mostra estatísticas"""
+    """Mostra estatisticas completas do brain.
+
+    Exibe contagem de memorias, decisoes, learnings, documentos
+    indexados, e metricas de eficacia.
+
+    Args:
+        args: Namespace do argparse (sem argumentos especificos)
+
+    Returns:
+        None. Imprime estatisticas formatadas.
+
+    Examples:
+        $ brain stats
+        Estatisticas do Claude Brain
+        Memoria:
+          memories: 28
+          decisions: 112
+          learnings: 12
+        RAG:
+          Documentos: 309
+          Chunks: 3421
+        Eficacia:
+          Taxa: 95% util
+    """
     m_stats = memory_stats()
     r_stats = rag_stats()
 
@@ -578,7 +1017,25 @@ def cmd_stats(args):
 
 
 def cmd_useful(args):
-    """Marca última ação como útil"""
+    """Marca a ultima acao do brain como util.
+
+    Registra feedback positivo para melhorar as metricas
+    de eficacia e ajudar a priorizar resultados.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - feedback (list[str], optional): Comentario adicional
+
+    Returns:
+        None. Imprime confirmacao.
+
+    Examples:
+        $ brain useful
+        ✓ Marcado como util
+
+        $ brain useful "solucao funcionou perfeitamente"
+        ✓ Marcado como util
+    """
     feedback = " ".join(args.feedback) if args.feedback else None
     mark_useful(useful=True, feedback=feedback)
     log_action("feedback", category="useful")
@@ -586,7 +1043,25 @@ def cmd_useful(args):
 
 
 def cmd_useless(args):
-    """Marca última ação como não útil"""
+    """Marca a ultima acao do brain como nao util.
+
+    Registra feedback negativo para ajustar metricas
+    e identificar areas de melhoria.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - feedback (list[str], optional): Motivo da insatisfacao
+
+    Returns:
+        None. Imprime confirmacao.
+
+    Examples:
+        $ brain useless
+        ✗ Marcado como nao util
+
+        $ brain useless "solucao desatualizada"
+        ✗ Marcado como nao util
+    """
     feedback = " ".join(args.feedback) if args.feedback else None
     mark_useful(useful=False, feedback=feedback)
     log_action("feedback", category="useless")
@@ -594,7 +1069,29 @@ def cmd_useless(args):
 
 
 def cmd_extract(args):
-    """Extrai conhecimento do histórico do Claude Code"""
+    """Extrai conhecimento do historico de sessoes do Claude Code.
+
+    Analisa conversas anteriores e extrai automaticamente
+    decisoes, learnings e memorias relevantes.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - limit (int): Numero de sessoes a processar (default: 10)
+            - dry_run (bool): Se True, nao salva nada
+
+    Returns:
+        None. Imprime progresso e totais extraidos.
+
+    Examples:
+        $ brain extract --limit 50
+        Extrator de Historico
+        ℹ Encontradas 50 sessoes
+        ✓ session_abc123: {'decisions': 2, 'learnings': 1}
+        Total: 15 decisoes, 8 learnings, 3 memorias
+
+        $ brain extract --dry-run
+        ...modo dry-run - nada foi salvo
+    """
     from scripts.extract_history import find_claude_sessions, process_session
 
     print_header("Extrator de Histórico")
@@ -621,7 +1118,28 @@ def cmd_extract(args):
 
 
 def cmd_hypotheses(args):
-    """Lista conhecimentos que ainda são hipóteses (não confirmados)"""
+    """Lista conhecimentos nao confirmados (hipoteses).
+
+    Mostra decisoes e learnings que ainda precisam de
+    validacao para aumentar sua confianca.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - limit (int, optional): Limite de resultados (default: 15)
+
+    Returns:
+        None. Imprime lista de hipoteses pendentes.
+
+    Examples:
+        $ brain hypotheses
+        Hipoteses Pendentes (precisam validacao)
+        [decisions#15] ○ 50%
+           Usar Redis para cache...
+           Usos: 2 | Criado: 2024-01-15
+
+        $ brain hypotheses -l 5
+        ...
+    """
     hypotheses = get_hypotheses(limit=args.limit or 15)
 
     if not hypotheses:
@@ -643,7 +1161,26 @@ def cmd_hypotheses(args):
 
 
 def cmd_confirm(args):
-    """Confirma que um conhecimento está correto"""
+    """Confirma que um conhecimento esta correto.
+
+    Aumenta a confianca de uma decisao/learning, movendo
+    de hipotese para confirmado apos validacao.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - table (str): Tabela (decisions|learnings|memories)
+            - id (int): ID do registro
+
+    Returns:
+        None. Imprime novo score de confianca.
+
+    Examples:
+        $ brain confirm decisions 15
+        ✓ Confirmado! Nova confianca: 85%
+
+        $ brain confirm learnings 3
+        ✓ Confirmado! Nova confianca: 90%
+    """
     if not args.table or not args.id:
         print_error("Uso: brain confirm <decisions|learnings|memories> <id>")
         return
@@ -656,7 +1193,28 @@ def cmd_confirm(args):
 
 
 def cmd_contradict(args):
-    """Marca um conhecimento como incorreto/desatualizado"""
+    """Marca um conhecimento como incorreto ou desatualizado.
+
+    Reduz a confianca e marca como contradito. Use quando
+    descobrir que uma decisao/learning esta errado.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - table (str): Tabela (decisions|learnings|memories)
+            - id (int): ID do registro
+            - reason (str, optional): Motivo da contradicao
+
+    Returns:
+        None. Imprime confirmacao.
+
+    Examples:
+        $ brain contradict decisions 15 -r "Nao funciona em Docker"
+        ✗ Marcado como contradito/incorreto
+          Motivo: Nao funciona em Docker
+
+        $ brain contradict learnings 3
+        ✗ Marcado como contradito/incorreto
+    """
     if not args.table or not args.id:
         print_error("Uso: brain contradict <decisions|learnings|memories> <id> [--reason 'motivo']")
         return
@@ -672,7 +1230,29 @@ def cmd_contradict(args):
 
 
 def cmd_supersede(args):
-    """Substitui um conhecimento antigo por um novo"""
+    """Substitui um conhecimento antigo por versao atualizada.
+
+    Cria novo registro e marca o antigo como deprecated.
+    Util quando ha evolucao do conhecimento.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - table (str): Tabela (decisions|learnings|memories)
+            - id (int): ID do registro antigo
+            - new (str): Novo conhecimento
+            - reason (str, optional): Motivo da substituicao
+
+    Returns:
+        None. Imprime ID do novo registro.
+
+    Examples:
+        $ brain supersede decisions 15 -n "Usar FAISS em vez de ChromaDB"
+        ✓ Substituido! Novo ID: 16
+          Antigo #15 marcado como deprecated
+
+        $ brain supersede learnings 3 -n "Nova solucao" -r "Versao antiga"
+        ...
+    """
     if not args.table or not args.id or not args.new:
         print_error("Uso: brain supersede <table> <id> --new 'novo conhecimento' [--reason 'motivo']")
         return
@@ -687,7 +1267,32 @@ def cmd_supersede(args):
 
 
 def cmd_maturity(args):
-    """Mostra estatísticas de maturidade do conhecimento"""
+    """Mostra estatisticas de maturidade do conhecimento.
+
+    Exibe quantos registros estao em cada estado de maturidade
+    (hypothesis, testing, confirmed, deprecated).
+
+    Args:
+        args: Namespace do argparse (sem argumentos especificos)
+
+    Returns:
+        None. Imprime estatisticas por tabela e status.
+
+    Examples:
+        $ brain maturity
+        Maturidade do Conhecimento
+
+        DECISIONS
+          ✓ confirmed: 15
+          ○ hypothesis: 97
+
+        LEARNINGS
+          ✓ confirmed: 3
+          ○ hypothesis: 9
+
+        CONTRADITOS (revisar/remover):
+          ⊗ [decisions#5] Usar ChromaDB...
+    """
     print_header("Maturidade do Conhecimento")
 
     tables = ['decisions', 'learnings', 'memories']
@@ -712,12 +1317,51 @@ def cmd_maturity(args):
 
 
 def cmd_dashboard(args):
-    """Mostra dashboard de eficácia"""
+    """Mostra dashboard de eficacia do brain.
+
+    Exibe metricas de uso, taxa de utilidade, e historico
+    de acoes para avaliar o valor do sistema.
+
+    Args:
+        args: Namespace do argparse (sem argumentos especificos)
+
+    Returns:
+        None. Imprime dashboard formatado.
+
+    Examples:
+        $ brain dashboard
+        Dashboard de Eficacia
+        Acoes totais: 150
+        Acoes avaliadas: 45
+        Taxa de utilidade: 93%
+        ...
+    """
     print_dashboard()
 
 
 def cmd_delete(args):
-    """Deleta um registro específico"""
+    """Deleta um registro especifico do banco.
+
+    Remove permanentemente uma memoria, decisao ou learning.
+    Pede confirmacao a menos que --force seja usado.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - table (str): Tabela (memories|decisions|learnings)
+            - id (int): ID do registro
+            - force (bool): Pular confirmacao
+
+    Returns:
+        None. Imprime confirmacao ou erro.
+
+    Examples:
+        $ brain delete decisions 15
+        Deletar decisions #15? [s/N] s
+        ✓ Deletado decisions #15
+
+        $ brain delete learnings 3 -f
+        ✓ Deletado learnings #3
+    """
     import sys
 
     if not args.table or args.id is None:
@@ -742,7 +1386,31 @@ def cmd_delete(args):
 
 
 def cmd_forget(args):
-    """Busca e deleta registros por busca semântica"""
+    """Busca e deleta registros por busca semantica.
+
+    Encontra registros similares a query e permite deletar
+    em lote. Por padrao roda em dry-run.
+
+    Args:
+        args: Namespace do argparse contendo:
+            - query (list[str]): Texto para buscar
+            - table (str, optional): Filtrar por tabela
+            - threshold (float): Score minimo (default: 0.8)
+            - execute (bool): Executar delecao (default: dry-run)
+
+    Returns:
+        None. Imprime resultados e deleta se --execute.
+
+    Examples:
+        $ brain forget "redis config"
+        [DRY-RUN] Resultados para 'redis config':
+          [85%] decisions:15
+               Usar Redis para cache...
+
+        $ brain forget "redis" --execute
+        [100%] decisions:15
+               -> Deletado!
+    """
     if not args.query:
         print_error("Uso: brain forget <query> [-t table] [--threshold 0.8] [--execute]")
         return
@@ -793,7 +1461,25 @@ def cmd_forget(args):
 
 
 def cmd_help(args):
-    """Mostra ajuda"""
+    """Mostra tela de ajuda com todos os comandos.
+
+    Exibe lista completa de comandos disponiveis com
+    descricao e exemplos de uso.
+
+    Args:
+        args: Namespace do argparse (sem argumentos especificos)
+
+    Returns:
+        None. Imprime ajuda formatada.
+
+    Examples:
+        $ brain help
+        Claude Brain - Sistema de Memoria Inteligente
+        ...lista de comandos...
+
+        $ brain --help
+        ...mesmo resultado...
+    """
     print("""
 🧠 Claude Brain - Sistema de Memória Inteligente
 

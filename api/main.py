@@ -10,9 +10,10 @@ from pathlib import Path
 # Adiciona scripts ao path para imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import FastAPI, Query, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Optional, List, Dict, Any
 import uvicorn
 import logging
@@ -23,6 +24,37 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 logger = logging.getLogger(__name__)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Middleware to add security headers to all responses."""
+
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+
+        # Prevent clickjacking
+        response.headers["X-Frame-Options"] = "DENY"
+
+        # Prevent MIME type sniffing
+        response.headers["X-Content-Type-Options"] = "nosniff"
+
+        # XSS protection (legacy, but still useful)
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+
+        # Referrer policy
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        # Permissions policy (restrict browser features)
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
+        # Content Security Policy (basic)
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+
+        # Cache control for API responses
+        if request.url.path.startswith("/api") or not request.url.path.endswith(".html"):
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+
+        return response
 
 # Rate limiter configuration
 limiter = Limiter(key_func=get_remote_address)
@@ -58,6 +90,9 @@ app = FastAPI(
 # Attach rate limiter to app
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Security headers middleware
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Configura CORS para frontend (restrito a localhost por seguranca)
 app.add_middleware(

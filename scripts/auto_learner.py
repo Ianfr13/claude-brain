@@ -6,6 +6,7 @@ Sistema de aprendizado automático que observa padrões e extrai conhecimento
 
 import re
 import json
+import threading
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
@@ -246,28 +247,38 @@ class AutoLearner:
         }
 
 
-# Singleton
-_learner = None
+# Singleton thread-safe
+_learner: Optional[AutoLearner] = None
+_learner_lock = threading.Lock()
+
 
 def get_learner() -> AutoLearner:
+    """Retorna instancia singleton do AutoLearner (thread-safe).
+
+    Usa double-checked locking para evitar contenção de lock
+    em chamadas subsequentes.
+    """
     global _learner
     if _learner is None:
-        _learner = AutoLearner()
+        with _learner_lock:
+            # Double-check dentro do lock
+            if _learner is None:
+                _learner = AutoLearner()
     return _learner
 
 
 # Funções de conveniência
-def learn_error(error_text: str, solution: str = None, project: str = None):
+def learn_error(error_text: str, solution: Optional[str] = None, project: Optional[str] = None) -> Optional[int]:
     """Aprende com um erro"""
     return get_learner().learn_from_error(error_text, solution, project)
 
 
-def learn_conversation(user_msg: str, assistant_msg: str, project: str = None):
+def learn_conversation(user_msg: str, assistant_msg: str, project: Optional[str] = None) -> None:
     """Aprende com uma conversa"""
     return get_learner().learn_from_conversation(user_msg, assistant_msg, project)
 
 
-def learn_file(file_path: str, content: str, project: str = None):
+def learn_file(file_path: str, content: str, project: Optional[str] = None) -> None:
     """Aprende com mudança de arquivo"""
     return get_learner().learn_from_file_change(file_path, content, project)
 

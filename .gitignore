@@ -18,10 +18,14 @@ memory/brain.db-shm
 memory/brain.db-wal
 memory/brain.db.bak
 memory/brain.db.bak.*
+memory/workflows/
 rag/query_cache.json
 rag/faiss/
 rag/embeddings/
+rag/diskcache/
 *.db
+*.db-shm
+*.db-wal
 *.db-journal
 
 # ============================================

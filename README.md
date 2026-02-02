@@ -115,6 +115,40 @@ claude-brain/
 
 ---
 
+## 🧠 Sistema de 3 Níveis
+
+O Claude Brain usa uma arquitetura de memória em camadas para otimizar performance e relevância:
+
+### Nível 1: SESSÃO (Workflows)
+- **Armazenamento**: Arquivos Markdown (context.md, todos.md, insights.md)
+- **Propósito**: Contexto de trabalho atual sem gastar tokens
+- **Uso**: `brain workflow start/update/resume/complete`
+- **Quando**: Tarefas longas, múltiplos memory wipes
+
+### Nível 2: BRAIN (SQLite + Ranking)
+- **Armazenamento**: SQLite com scoring automático
+- **Propósito**: Conhecimento persistente com relevância contextual
+- **Scoring**: Especificidade (25%) + Recência (20%) + Confiança (25%) + Uso (15%) + Validação (15%)
+- **Uso**: `brain remember/decide/learn/ask`
+- **Quando**: Decisões, learnings, memórias reutilizáveis
+
+### Nível 3: RAG (FAISS + Cache)
+- **Armazenamento**: FAISS + Redis/diskcache
+- **Propósito**: Busca semântica em documentação
+- **Cache**: 24h TTL, evita re-embeddings
+- **Uso**: Fallback automático no `brain ask`
+- **Quando**: Queries não encontradas no Brain
+
+```bash
+# Exemplo de fluxo completo
+brain workflow start "Implementar cache" -p meu-projeto  # Nível 1
+brain decide "Usar Redis" -p meu-projeto                 # Nível 2
+brain ask "redis python timeout"                         # Nível 2 → 3 (fallback)
+brain workflow complete --summary "Done"                 # Nível 1 → 2 (extrai insights)
+```
+
+---
+
 ## 🎯 Funcionalidades
 
 ### API REST (/v1/)
@@ -140,6 +174,30 @@ curl http://localhost:8765/v1/graph/entidade-nome
 curl http://localhost:8765/v1/stats
 ```
 
+### Ranking Automático
+
+O sistema rankeia automaticamente resultados usando 5 fatores:
+
+```
+SCORE = (Especificidade×0.25) + (Recência×0.20) + (Confiança×0.25) + (Uso×0.15) + (Validação×0.15)
+
+Especificidade: Projeto exato (1.0) vs geral (0.5) vs outro (0.3)
+Recência: Última semana (1.0) vs mais antigo (0.2)
+Confiança: confidence_score do conhecimento
+Uso: Quantas vezes foi acessado
+Validação: Confirmado (1.0) vs hypothesis (0.4) vs contradicted (0.0)
+```
+
+**Detecção automática de conflitos:**
+```bash
+$ brain ask "redis" -p meu-projeto
+# ★ 85% [DECISION] Usar Redis com TTL 24h [meu-projeto]
+# o 72% [LEARNING] ConnectionError → systemctl
+# o 68% [MEMORY] Redis precisa pickle
+#
+# ⚠ CONFLITOS: Scores próximos - considere validar
+```
+
 ### CLI
 
 ```bash
@@ -154,6 +212,15 @@ brain learn "ModuleNotFoundError" -s "pip install <pacote>" -c "Ao importar mód
 
 # Buscar (IA)
 brain ask "como debugar timeout em requests?"
+brain ask "redis cache" -p meu-projeto  # Busca com contexto de projeto
+
+# Workflows (Sessões Longas)
+brain workflow start "Implementar cache" -p meu-projeto
+brain workflow update --todo "configurar Redis"
+brain workflow update --done 1
+brain workflow update --insight "TTL de 24h funciona melhor"
+brain workflow resume  # Após memory wipe
+brain workflow complete --summary "Cache implementado com Redis"
 
 # Confirm/Contradict
 brain confirm decisions 15  # Marca decisão como confirmada

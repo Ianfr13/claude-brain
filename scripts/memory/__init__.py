@@ -125,6 +125,30 @@ from .delete import (
     delete_by_search,
 )
 
+# ============ WORKFLOWS ============
+from .workflows import (
+    save_workflow,
+    get_workflow,
+    get_active_workflow,
+    list_workflows,
+    add_todo,
+    complete_todo,
+    add_insight,
+    add_file,
+    complete_workflow,
+    read_workflow_context,
+)
+
+# ============ SCORING & CONFLICT RESOLUTION ============
+from .scoring import (
+    calculate_relevance_score,
+    rank_results,
+    detect_conflicts,
+    decay_unused,
+    boost_confirmed,
+    get_decision_score_components,
+)
+
 
 # ============ EXPORTS ============
 # Lista completa para import * (nao recomendado, mas mantido para compatibilidade)
@@ -155,6 +179,13 @@ __all__ = [
     'get_stats', 'export_context',
     # Delete
     'delete_record', 'delete_by_search',
+    # Workflows
+    'save_workflow', 'get_workflow', 'get_active_workflow', 'list_workflows',
+    'add_todo', 'complete_todo', 'add_insight', 'add_file',
+    'complete_workflow', 'read_workflow_context',
+    # Scoring & Conflict Resolution
+    'calculate_relevance_score', 'rank_results', 'detect_conflicts',
+    'decay_unused', 'boost_confirmed', 'get_decision_score_components',
 ]
 
 

@@ -40,6 +40,8 @@ from scripts.cli import (
     # Utils
     cmd_delete, cmd_forget, cmd_export, cmd_stats, cmd_help,
     cmd_useful, cmd_useless, cmd_dashboard, cmd_extract,
+    # Workflow
+    cmd_workflow,
 )
 
 
@@ -54,6 +56,7 @@ def main():
     p.add_argument("text", nargs="*")
     p.add_argument("-c", "--category")
     p.add_argument("-i", "--importance", type=int)
+    p.add_argument("-p", "--project", help="Projeto associado (se omitido, e conhecimento geral)")
 
     p = subparsers.add_parser("decide")
     p.add_argument("decision", nargs="*")
@@ -77,6 +80,7 @@ def main():
 
     p = subparsers.add_parser("ask", help="Consulta inteligente (semantica + decisoes + learnings)")
     p.add_argument("query", nargs="*")
+    p.add_argument("-p", "--project", help="Prioriza contexto do projeto especificado")
 
     p = subparsers.add_parser("recall")
     p.add_argument("query", nargs="*")
@@ -194,6 +198,21 @@ def main():
     p.add_argument("--threshold", type=float, default=0.8, help="Score minimo para deletar")
     p.add_argument("--execute", action="store_true", help="Executar delecao (padrao e dry-run)")
 
+    # ============ WORKFLOWS ============
+
+    p = subparsers.add_parser("workflow", help="Sessoes de trabalho com contexto")
+    p.add_argument("action", choices=["start", "update", "resume", "complete", "status", "list", "show"])
+    p.add_argument("name", nargs="*", help="Nome da tarefa (para start/show)")
+    p.add_argument("-p", "--project", help="Projeto associado")
+    p.add_argument("-g", "--goal", help="Goal detalhado da sessao")
+    p.add_argument("--todo", help="Adicionar TODO")
+    p.add_argument("--done", help="Marcar TODO como concluido (numero)")
+    p.add_argument("--insight", help="Adicionar insight")
+    p.add_argument("--file", help="Registrar arquivo modificado")
+    p.add_argument("--summary", help="Resumo ao completar")
+    p.add_argument("--id", help="ID do workflow (para resume)")
+    p.add_argument("--status", choices=["active", "completed"], help="Filtrar por status (list)")
+
     args = parser.parse_args()
 
     # Mapeamento de comandos para funcoes
@@ -240,6 +259,8 @@ def main():
         # Delete
         "delete": cmd_delete,
         "forget": cmd_forget,
+        # Workflow
+        "workflow": cmd_workflow,
     }
 
     # Robustez: Try/except global com exit codes apropriados

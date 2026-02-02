@@ -22,6 +22,7 @@ from scripts.rag_engine import (
     get_context_for_query as simple_context
 )
 from scripts.memory_store import get_decisions, find_solution
+from scripts.memory import rank_results, detect_conflicts
 from scripts.metrics import log_action
 
 # Tenta usar FAISS para busca semantica
@@ -195,85 +196,131 @@ def cmd_context(args):
 
 
 def cmd_ask(args):
-    """Consulta inteligente que combina todas as fontes.
+    """Consulta inteligente que combina todas as fontes com ranking automático.
 
     Busca em learnings, decisoes e documentos para fornecer
     a melhor resposta possivel para a duvida do usuario.
 
+    Se -p project fornecido, prioriza contexto do projeto especificado.
+
+    Implementa:
+    - Ranking por score composto (especificidade, recência, confiança, uso, validação)
+    - Detecção automática de conflitos (resultados com scores próximos)
+
     Args:
         args: Namespace do argparse contendo:
             - query (list[str]): Pergunta ou duvida
+            - project (str, optional): Projeto para priorizar contexto
 
     Returns:
-        None. Imprime resultados de todas as fontes relevantes.
+        None. Imprime resultados rankos com detecção de conflitos.
 
     Examples:
-        $ brain ask "como resolver ModuleNotFoundError"
-        SOLUCAO CONHECIDA: * 85%
-           Erro: ModuleNotFoundError
-           Solucao: pip install <pacote>
+        $ brain ask "como resolver ModuleNotFoundError" -p vsl-analysis
+        MELHOR RESULTADO:
+        * 85% ModuleNotFoundError → pip install <pacote>
 
-        DECISOES RELACIONADAS:
-           o 50% Usar venv para isolar dependencias
+        OUTRAS SOLUÇÕES:
+        o 65% (CONFLITO) ConnectionError → verificar redis-server
 
         $ brain ask "qual banco de dados usar"
         ...
     """
     if not args.query:
-        print_error("Uso: brain ask <pergunta>")
+        print_error("Uso: brain ask <pergunta> [-p projeto]")
         return
 
     query = " ".join(args.query)
-    found_anything = False
+    project = getattr(args, 'project', None)
+
+    # Coleta resultados de todas as fontes
+    all_results = []
 
     # 1. Busca em learnings (erros/solucoes)
-    solution = find_solution(error_type=query, error_message=query, similarity_threshold=0.4)
+    solution = find_solution(error_type=query, error_message=query, similarity_threshold=0.4, project=project)
     if solution:
-        found_anything = True
-        confidence = solution.get('confidence_score', 0.5) or 0.5
-        status_icon = "*" if solution.get('maturity_status') == 'confirmed' else "o"
-        print(f"\n{c('SOLUCAO CONHECIDA:', Colors.GREEN)} {status_icon} {confidence*100:.0f}%")
-        print(f"   Erro: {solution['error_type']}")
-        print(f"   Solucao: {solution['solution']}")
-        if solution.get('context'):
-            print(f"   Contexto: {solution['context']}")
-        if solution.get('prevention'):
-            print(f"   Prevencao: {solution['prevention']}")
+        solution['_type'] = 'learning'
+        solution['_display_name'] = f"{solution.get('error_type')} → {solution.get('solution', '')[:50]}"
+        all_results.append(solution)
 
     # 2. Busca em decisoes
-    decisions = get_decisions(limit=50)
-    relevant_decisions = []
+    decisions = get_decisions(project=project, limit=50)
+    if not decisions and project:
+        decisions = get_decisions(project=None, limit=50)
+
+    # Filtra decisões relevantes à query
     query_words = set(query.lower().split())
     for d in decisions:
         text = f"{d['decision']} {d.get('reasoning', '')} {d.get('project', '')}".lower()
         if any(word in text for word in query_words if len(word) > 3):
-            relevant_decisions.append(d)
+            d['_type'] = 'decision'
+            d['_display_name'] = d.get('decision', '')[:70]
+            all_results.append(d)
 
-    if relevant_decisions[:3]:
-        found_anything = True
-        print(f"\n{c('DECISOES RELACIONADAS:', Colors.CYAN)}")
-        for d in relevant_decisions[:3]:
-            conf = d.get('confidence_score', 0.5) or 0.5
-            status = "*" if d.get('maturity_status') == 'confirmed' else "o"
-            proj = f"[{d['project']}] " if d.get('project') else ""
-            print(f"   {status} {conf*100:.0f}% {proj}{d['decision'][:70]}")
+    # 3. Busca semantica nos docs
+    doc_results = search(query, limit=3)
+    for r in doc_results:
+        r['_type'] = 'document'
+        r['_display_name'] = f"{r.get('source', '')} - {r.get('text', '')[:40]}"
+        # Converte score do RAG em confidence_score
+        if 'score' in r:
+            r['confidence_score'] = r['score']
+        all_results.append(r)
 
-    # 3. Busca semantica nos docs (apenas se nao encontrou nada especifico)
-    if not found_anything:
-        results = search(query, limit=3)
-        if results:
-            found_anything = True
-            print(f"\n{c('DOCUMENTOS RELEVANTES:', Colors.YELLOW)}")
-            for r in results[:3]:
-                score = r.get('score', 0)
-                print(f"   [{score:.1f}] {r['source']}")
-                print(f"        {r['text'][:100]}...")
-
-    if not found_anything:
+    if not all_results:
         print(c("\nNada encontrado no brain para essa query.", Colors.RED))
         print(c("   Apos resolver, salve com: brain learn/decide", Colors.DIM))
-    else:
-        print(c(f"\nUtil? brain useful | Errado? brain contradict <table> <id>", Colors.DIM))
+        return
+
+    # Rankeia todos os resultados por score composto
+    ranked = rank_results(all_results, query, project)
+
+    # Detecta conflitos
+    conflicts = detect_conflicts(ranked, threshold=0.10)
+
+    # Exibe resultados
+    print_header(f"Resultados para: '{query}'")
+
+    # Mostra top 1 resultado
+    if ranked:
+        top = ranked[0]
+        score = top.get('relevance_score', 0)
+        status_icon = "*" if top.get('maturity_status') == 'confirmed' else "o"
+        proj = f" [{top.get('project')}]" if top.get('project') else ""
+        type_label = top.get('_type', 'unknown').upper()
+
+        print(f"\n{c('MELHOR RESULTADO:', Colors.GREEN)} {status_icon} {score*100:.0f}% [{type_label}]{proj}")
+        print(f"   {top.get('_display_name', '')}")
+
+        if top.get('_type') == 'learning':
+            if top.get('solution'):
+                print(f"   Solucao: {top['solution']}")
+            if top.get('prevention'):
+                print(f"   Prevencao: {top['prevention']}")
+
+    # Mostra outros resultados (top 2-4)
+    if len(ranked) > 1:
+        print(f"\n{c('OUTRAS OPCOES:', Colors.CYAN)}")
+        for i, r in enumerate(ranked[1:4], 1):
+            score = r.get('relevance_score', 0)
+            status_icon = "*" if r.get('maturity_status') == 'confirmed' else "o"
+            conflict_warn = " (CONFLITO)" if any(c[1] == r for c in conflicts) else ""
+            type_label = r.get('_type', 'unknown').upper()
+            proj = f" [{r.get('project')}]" if r.get('project') else ""
+
+            print(f"\n   {status_icon} {score*100:.0f}%{conflict_warn} [{type_label}]{proj}")
+            print(f"      {r.get('_display_name', '')[:60]}")
+
+    # Aviso se houver conflitos
+    if conflicts:
+        print(f"\n{c('⚠ CONFLITOS DETECTADOS:', Colors.YELLOW)}")
+        print(c("   Resultados com scores muito próximos - ambiguidade na busca", Colors.DIM))
+        print(c("   Considere: brain decide, brain learn (para validar escolha)", Colors.DIM))
+
+    # Log da acao
+    log_action("ask", query=query, results_count=len(ranked), project=project)
+
+    print(c(f"\nUtil? brain useful | Errado? brain contradict <table> <id>", Colors.DIM))
 
 
 def cmd_related(args):

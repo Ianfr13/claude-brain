@@ -629,7 +629,7 @@
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:8765';
+        const API_BASE = '/v1';
 
         function dashboard() {
             return {
@@ -673,6 +673,8 @@
 
                 // Initialize
                 init() {
+                    console.log('Dashboard init() chamado');
+                    console.log('API_BASE:', API_BASE);
                     this.fetchAll();
                     this.startAutoRefresh();
                 },
@@ -690,10 +692,12 @@
 
                 // Fetch all data
                 async fetchAll() {
+                    console.log('fetchAll() iniciado');
                     this.loading = true;
                     this.error = '';
 
                     try {
+                        console.log('Chamando APIs...');
                         await Promise.all([
                             this.fetchStats(),
                             this.fetchEffectiveness(),
@@ -702,14 +706,16 @@
                             this.fetchPreferences(),
                         ]);
 
+                        console.log('Todas as APIs responderam!');
                         this.connected = true;
                         this.lastUpdate = new Date().toLocaleTimeString('pt-BR');
                     } catch (e) {
                         console.error('Fetch error:', e);
                         this.connected = false;
-                        this.error = 'Erro ao conectar com a API';
+                        this.error = 'Erro ao conectar com a API: ' + e.message;
                     } finally {
                         this.loading = false;
+                        console.log('fetchAll() finalizado. Connected:', this.connected);
                     }
                 },
 

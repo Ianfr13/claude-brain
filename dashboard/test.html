@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Brain Dashboard - Test</title>
+    <script src="https://cdn.tailwindcss.com?v=3"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white p-8">
+    <div x-data="{ message: 'Alpine.js funcionando!' }">
+        <h1 class="text-3xl font-bold mb-4">Teste Dashboard Brain</h1>
+        <p class="mb-4" x-text="message"></p>
+        
+        <div id="api-test" class="mt-8">
+            <h2 class="text-xl font-bold mb-2">Teste API:</h2>
+            <button onclick="testAPI()" class="bg-blue-500 px-4 py-2 rounded">Testar API</button>
+            <pre id="result" class="mt-4 bg-gray-800 p-4 rounded"></pre>
+        </div>
+    </div>
+    
+    <script>
+        console.log('JavaScript carregado!');
+        
+        async function testAPI() {
+            const result = document.getElementById('result');
+            result.textContent = 'Testando...';
+            
+            try {
+                const response = await fetch('/v1/stats');
+                const data = await response.json();
+                result.textContent = JSON.stringify(data, null, 2);
+                console.log('API funcionando:', data);
+            } catch (error) {
+                result.textContent = 'Erro: ' + error.message;
+                console.error('Erro na API:', error);
+            }
+        }
+        
+        // Teste automático
+        setTimeout(() => {
+            console.log('Executando teste automático...');
+            testAPI();
+        }, 1000);
+    </script>
+</body>
+</html>

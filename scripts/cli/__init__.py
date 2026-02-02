@@ -53,6 +53,9 @@ from .utils import (
     cmd_useful, cmd_useless, cmd_dashboard, cmd_extract
 )
 
+# Workflow - Sessoes de trabalho com contexto
+from .workflow import cmd_workflow
+
 __all__ = [
     # Base
     'Colors', 'c',
@@ -75,4 +78,6 @@ __all__ = [
     # Utils
     'cmd_delete', 'cmd_forget', 'cmd_export', 'cmd_stats', 'cmd_help',
     'cmd_useful', 'cmd_useless', 'cmd_dashboard', 'cmd_extract',
+    # Workflow
+    'cmd_workflow',
 ]

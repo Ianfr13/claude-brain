@@ -21,29 +21,41 @@ def cmd_remember(args):
     Args:
         args: Namespace do argparse contendo:
             - text (list[str]): Texto da memoria a ser salva
-            - category (str, optional): Categoria (default: "general")
+            - category (str, optional): Categoria (default: "general" ou "geral")
             - importance (int, optional): Importancia 1-10 (default: 5)
+            - project (str, optional): Projeto associado (se None, e conhecimento geral)
 
     Returns:
         None. Imprime mensagem de sucesso com ID ou erro.
 
     Examples:
-        $ brain remember "Usuario prefere respostas em portugues"
-        * Memoria salva (ID: 1)
+        $ brain remember "Redis precisa pickle para objetos" -c geral
+        * Memoria salva (ID: 1) [GERAL]
 
-        $ brain remember "API do Slack tem rate limit" -c apis -i 8
-        * Memoria salva (ID: 2)
+        $ brain remember "Nossa API usa TTL 24h" -p vsl-analysis
+        * Memoria salva (ID: 2) [vsl-analysis]
     """
     if not args.text:
-        print_error("Uso: brain remember <texto>")
+        print_error("Uso: brain remember <texto> [-c categoria] [-p projeto]")
         return
 
     text = " ".join(args.text)
-    category = args.category or "general"
+    project = getattr(args, 'project', None)
+
+    # Se tem projeto, e especifico; se nao tem, e geral
+    if project:
+        category = args.category or "workflow"
+        metadata = {"project": project}
+    else:
+        category = args.category or "geral"
+        metadata = {}
+
     importance = args.importance or 5
 
-    mid = save_memory("general", text, category=category, importance=importance)
-    print_success(f"Memoria salva (ID: {mid})")
+    mid = save_memory("general", text, category=category, importance=importance, metadata=metadata)
+
+    scope = f"[{project}]" if project else "[GERAL]"
+    print_success(f"Memoria salva (ID: {mid}) {scope}")
 
 
 def cmd_recall(args):

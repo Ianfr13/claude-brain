@@ -237,7 +237,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
 
         # Content Security Policy (basic)
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com; "
+            "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; "
+            "font-src 'self' data: https://fonts.gstatic.com https://r2cdn.perplexity.ai; "
+            "img-src 'self' data: https:;"
+        )
 
         # Cache control for API responses
         if request.url.path.startswith("/api") or not request.url.path.endswith(".html"):
@@ -283,10 +289,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Security headers middleware
 app.add_middleware(SecurityHeadersMiddleware)
 
-# Configura CORS para frontend (restrito a localhost por seguranca)
+# Configura CORS para frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8765", "http://127.0.0.1:8765"],
+    allow_origins=["*"],  # Permite todas as origens (API é apenas leitura)
     allow_credentials=False,
     allow_methods=["GET"],  # API somente leitura
     allow_headers=["*"],
@@ -396,7 +402,11 @@ def list_preferences(
     como frameworks preferidos, estilo de codigo, etc.
     """
     try:
-        preferences = get_all_preferences(min_confidence=min_confidence)
+        preferences_dict = get_all_preferences(min_confidence=min_confidence)
+        # Converter dict para lista de dicts
+        preferences = [
+            {"key": k, "value": v} for k, v in preferences_dict.items()
+        ]
         return {
             "count": len(preferences),
             "min_confidence": min_confidence,
@@ -570,6 +580,15 @@ def dashboard():
     if DASHBOARD_PATH.exists():
         return HTMLResponse(content=DASHBOARD_PATH.read_text(), status_code=200)
     return HTMLResponse(content="<h1>Dashboard not found</h1>", status_code=404)
+
+
+@app.get("/test", tags=["Dashboard"], response_class=HTMLResponse)
+def dashboard_test():
+    """Serve página de teste do dashboard"""
+    test_path = Path(__file__).parent.parent / "dashboard" / "test.html"
+    if test_path.exists():
+        return HTMLResponse(content=test_path.read_text(), status_code=200)
+    return HTMLResponse(content="<h1>Test page not found</h1>", status_code=404)
 
 
 # ============ MAIN ============

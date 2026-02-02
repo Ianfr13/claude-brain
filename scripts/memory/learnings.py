@@ -137,7 +137,7 @@ def save_learning(error_type: str, solution: str, error_message: Optional[str] =
 
 
 def find_solution(error_type: Optional[str] = None, error_message: Optional[str] = None,
-                  similarity_threshold: float = 0.6) -> Optional[Dict[str, Any]]:
+                  similarity_threshold: float = 0.6, project: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Busca solucao para um erro usando fuzzy matching.
 
@@ -145,6 +145,7 @@ def find_solution(error_type: Optional[str] = None, error_message: Optional[str]
         error_type: Tipo do erro (ex: "ModuleNotFoundError")
         error_message: Mensagem de erro para busca por similaridade
         similarity_threshold: Threshold minimo de similaridade (default 0.6 para busca)
+        project: Filtrar por projeto (opcional). Se fornecido, prioriza esse projeto.
 
     Returns:
         Dict com learning encontrado ou None
@@ -153,9 +154,18 @@ def find_solution(error_type: Optional[str] = None, error_message: Optional[str]
         c = conn.cursor()
 
         if error_type and error_message:
-            # Primeiro tenta match exato por error_type
-            c.execute('SELECT * FROM learnings WHERE error_type = ?', (error_type,))
-            candidates = [dict(row) for row in c.fetchall()]
+            # Primeiro tenta match exato por error_type (com prioridade de projeto se fornecido)
+            if project:
+                c.execute('SELECT * FROM learnings WHERE error_type = ? AND project = ?', (error_type, project))
+                candidates = [dict(row) for row in c.fetchall()]
+
+                # Se nao achou no projeto, busca geral
+                if not candidates:
+                    c.execute('SELECT * FROM learnings WHERE error_type = ?', (error_type,))
+                    candidates = [dict(row) for row in c.fetchall()]
+            else:
+                c.execute('SELECT * FROM learnings WHERE error_type = ?', (error_type,))
+                candidates = [dict(row) for row in c.fetchall()]
 
             if candidates:
                 # Usa fuzzy matching para encontrar o melhor match
@@ -176,9 +186,18 @@ def find_solution(error_type: Optional[str] = None, error_message: Optional[str]
                 # Fallback: retorna o mais frequente do mesmo tipo
                 return max(candidates, key=lambda x: (x.get('frequency', 0), x.get('last_occurred', '')))
 
-            # Se nao achou por tipo, busca por similaridade em todas as mensagens
-            c.execute('SELECT * FROM learnings')
-            all_learnings = [dict(row) for row in c.fetchall()]
+            # Se nao achou por tipo, busca por similaridade em todas as mensagens (com projeto como prioridade)
+            if project:
+                c.execute('SELECT * FROM learnings WHERE project = ?', (project,))
+                all_learnings = [dict(row) for row in c.fetchall()]
+
+                # Se ainda nao achou no projeto, busca geral
+                if not all_learnings:
+                    c.execute('SELECT * FROM learnings')
+                    all_learnings = [dict(row) for row in c.fetchall()]
+            else:
+                c.execute('SELECT * FROM learnings')
+                all_learnings = [dict(row) for row in c.fetchall()]
 
             best_match = None
             best_score = 0.0
@@ -194,12 +213,30 @@ def find_solution(error_type: Optional[str] = None, error_message: Optional[str]
                 return best_match
 
         elif error_type:
-            c.execute('''
-                SELECT * FROM learnings WHERE error_type = ?
-                ORDER BY frequency DESC LIMIT 1
-            ''', (error_type,))
-            row = c.fetchone()
-            return dict(row) if row else None
+            # Busca por error_type com prioridade de projeto
+            if project:
+                c.execute('''
+                    SELECT * FROM learnings WHERE error_type = ? AND project = ?
+                    ORDER BY frequency DESC LIMIT 1
+                ''', (error_type, project))
+                row = c.fetchone()
+                if row:
+                    return dict(row)
+
+                # Fallback: busca geral
+                c.execute('''
+                    SELECT * FROM learnings WHERE error_type = ?
+                    ORDER BY frequency DESC LIMIT 1
+                ''', (error_type,))
+                row = c.fetchone()
+                return dict(row) if row else None
+            else:
+                c.execute('''
+                    SELECT * FROM learnings WHERE error_type = ?
+                    ORDER BY frequency DESC LIMIT 1
+                ''', (error_type,))
+                row = c.fetchone()
+                return dict(row) if row else None
 
         return None
 

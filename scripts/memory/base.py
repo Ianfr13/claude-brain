@@ -35,7 +35,7 @@ DB_PATH = Path("/root/claude-brain/memory/brain.db")
 ALLOWED_TABLES = {'memories', 'decisions', 'learnings'}
 
 # Todas as tabelas do sistema (para stats e outras operacoes internas)
-ALL_TABLES = {'memories', 'decisions', 'learnings', 'entities', 'relations', 'preferences', 'patterns', 'sessions'}
+ALL_TABLES = {'memories', 'decisions', 'learnings', 'entities', 'relations', 'preferences', 'patterns', 'sessions', 'workflows'}
 
 # Estados de maturidade (usado por decisions.py e learnings.py)
 MATURITY_STATES = {
@@ -275,6 +275,31 @@ def init_db():
             )
         ''')
 
+        # Workflows (sessoes de trabalho com contexto em 3 niveis)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS workflows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                project TEXT,
+                status TEXT DEFAULT 'active',
+
+                goal TEXT NOT NULL,
+                todos JSON,
+                insights JSON,
+                files_modified JSON,
+
+                summary TEXT,
+                decisions_created JSON,
+                learnings_created JSON,
+                memories_created JSON,
+
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP
+            )
+        ''')
+
         # Indices
         c.execute('CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(content_hash)')
@@ -283,6 +308,8 @@ def init_db():
         c.execute('CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_entity)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_preferences_key ON preferences(key)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project)')
 
     # Migra bancos antigos para adicionar colunas novas
     migrate_db()

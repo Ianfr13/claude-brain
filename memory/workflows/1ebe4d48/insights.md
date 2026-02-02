@@ -1,0 +1,3 @@
+# Insights
+
+- Descoberta importante

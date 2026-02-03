@@ -149,6 +149,16 @@ from .scoring import (
     get_decision_score_components,
 )
 
+# ============ JOB QUEUE ============
+from .jobs import (
+    create_job,
+    get_job,
+    list_jobs,
+    delete_job,
+    cleanup_jobs,
+    get_job_count,
+)
+
 
 # ============ EXPORTS ============
 # Lista completa para import * (nao recomendado, mas mantido para compatibilidade)
@@ -186,6 +196,8 @@ __all__ = [
     # Scoring & Conflict Resolution
     'calculate_relevance_score', 'rank_results', 'detect_conflicts',
     'decay_unused', 'boost_confirmed', 'get_decision_score_components',
+    # Job Queue
+    'create_job', 'get_job', 'list_jobs', 'delete_job', 'cleanup_jobs', 'get_job_count',
 ]
 
 

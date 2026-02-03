@@ -56,6 +56,9 @@ from .utils import (
 # Workflow - Sessoes de trabalho com contexto
 from .workflow import cmd_workflow
 
+# Jobs - Fila de jobs com TTL
+from .jobs import cmd_job, cmd_cli
+
 __all__ = [
     # Base
     'Colors', 'c',
@@ -80,4 +83,6 @@ __all__ = [
     'cmd_useful', 'cmd_useless', 'cmd_dashboard', 'cmd_extract',
     # Workflow
     'cmd_workflow',
+    # Jobs
+    'cmd_job', 'cmd_cli',
 ]

@@ -42,6 +42,8 @@ from scripts.cli import (
     cmd_useful, cmd_useless, cmd_dashboard, cmd_extract,
     # Workflow
     cmd_workflow,
+    # Jobs
+    cmd_job, cmd_cli,
 )
 
 
@@ -213,6 +215,30 @@ def main():
     p.add_argument("--id", help="ID do workflow (para resume)")
     p.add_argument("--status", choices=["active", "completed"], help="Filtrar por status (list)")
 
+    # ============ JOB QUEUE ============
+
+    p = subparsers.add_parser("job", help="Fila de jobs com TTL")
+    p.add_argument("action", choices=["create", "get", "list", "cleanup", "delete", "stats", "iterate", "history", "status", "tools"])
+    p.add_argument("job_id", nargs="?", help="ID do job (para get/delete/iterate/history/status/tools)")
+    p.add_argument("--ttl", type=int, help="Time to live em segundos (para create)")
+    p.add_argument("--data", help="JSON completo do job (para create)")
+    p.add_argument("--prompt", nargs="*", help="Prompt do job (para create)")
+    p.add_argument("--skills", action="append", help="Skills a usar (para create, pode repetir)")
+    p.add_argument("--brain-query", action="append", help="Brain queries no formato 'query|project' (para create, pode repetir)")
+    p.add_argument("--files", action="append", help="Arquivos relevantes (para create, pode repetir)")
+    p.add_argument("--context", help="Contexto JSON adicional (para create)")
+    p.add_argument("--json", action="store_true", help="Saida em JSON (para get/list/history/tools)")
+    p.add_argument("--all", action="store_true", help="Incluir expirados (para list/stats)")
+    p.add_argument("--type", help="Tipo de iteracao: execution ou review (para iterate)")
+    p.add_argument("--agent", help="Agente que executa: haiku ou opus (para iterate)")
+    p.add_argument("--result", help="Resultado da iteracao (para iterate)")
+    p.add_argument("--set", help="Novo status para o job (para status)")
+    p.add_argument("--build-missing", action="store_true", help="Criar job builder para ferramentas faltando (para tools)")
+
+    p = subparsers.add_parser("cli", help="Gerenciamento de ferramentas CLI em .claude/cli/")
+    p.add_argument("action", choices=["list"])
+    p.add_argument("--json", action="store_true", help="Saida em JSON")
+
     args = parser.parse_args()
 
     # Mapeamento de comandos para funcoes
@@ -261,6 +287,10 @@ def main():
         "forget": cmd_forget,
         # Workflow
         "workflow": cmd_workflow,
+        # Jobs
+        "job": cmd_job,
+        # CLI
+        "cli": cmd_cli,
     }
 
     # Robustez: Try/except global com exit codes apropriados

@@ -354,11 +354,14 @@ def compute_documents_hash(doc_index: Dict) -> str:
     """Computa hash dos documentos para detectar mudanças.
 
     Considera:
-    - Lista de documentos (hashes)
+    - Lista de documentos (hashes) em ordem determinística
     - Timestamps de modificação dos arquivos fonte
+
+    NOTA: Hash é determinístico pois sort() garante ordem consistente
     """
     hash_data = []
 
+    # IMPORTANTE: sorted() garante ordem determinística
     for doc_hash, doc_info in sorted(doc_index.get("documents", {}).items()):
         source = doc_info.get("source", "")
         source_path = Path(source)
@@ -376,6 +379,7 @@ def compute_documents_hash(doc_index: Dict) -> str:
                 hash_data.append(source)
 
     # Gera hash combinado (SHA256 para integridade)
+    # Ordem é determinística por causa de sorted()
     combined = "|".join(hash_data)
     return hashlib.sha256(combined.encode()).hexdigest()
 
@@ -388,13 +392,19 @@ def is_index_stale() -> Tuple[bool, str]:
 
     Critérios para índice obsoleto:
     1. Índice não existe
-    2. index.json foi modificado após o índice FAISS
-    3. Hash dos documentos mudou desde o último rebuild
-    4. Algum arquivo fonte foi modificado após o índice
+    2. rebuild_state.json não foi criado (primeira execução ou erro anterior)
+    3. index.json foi modificado após o índice FAISS
+    4. Hash dos documentos mudou desde o último rebuild
+    5. Algum arquivo fonte foi modificado após o índice
     """
     # Verifica se índice existe
     if not FAISS_INDEX_FILE.exists() or not FAISS_META_FILE.exists():
         return True, "Índice FAISS não existe"
+
+    # CRÍTICO: Se rebuild_state.json não existe, índice nunca foi construído
+    # adequadamente (primeira execução ou erro anterior)
+    if not REBUILD_STATE_FILE.exists():
+        return True, "rebuild_state.json não existe (primeira construção?)"
 
     # Timestamp do índice FAISS
     faiss_mtime = FAISS_INDEX_FILE.stat().st_mtime
@@ -409,12 +419,17 @@ def is_index_stale() -> Tuple[bool, str]:
     rebuild_state = load_rebuild_state()
     last_hash = rebuild_state.get("documents_hash", "")
 
+    # Se last_hash não foi salvo (erro anterior ou corrupção), rebuilda
+    if not last_hash:
+        return True, "Hash anterior não encontrado em rebuild_state.json"
+
     # Computa hash atual dos documentos
     doc_index = load_doc_index()
     current_hash = compute_documents_hash(doc_index)
 
-    if last_hash and current_hash != last_hash:
-        return True, "Hash dos documentos mudou"
+    # Compara hashes
+    if current_hash != last_hash:
+        return True, f"Hash dos documentos mudou ({current_hash[:8]}... vs {last_hash[:8]}...)"
 
     # Verifica se algum arquivo fonte foi modificado após o índice
     for doc_hash, doc_info in doc_index.get("documents", {}).items():
@@ -494,17 +509,31 @@ def load_faiss_index(auto_rebuild: bool = True):
 
 
 def save_faiss_index(index, metadata):
-    """Salva índice FAISS e metadados"""
+    """Salva índice FAISS e metadados com tratamento de erro.
+
+    Garante que globais são atualizados APENAS após sucesso da escrita.
+    """
     global _faiss_index, _faiss_metadata
     import faiss
 
     ensure_dirs()
-    faiss.write_index(index, str(FAISS_INDEX_FILE))
-    with open(FAISS_META_FILE, 'w', encoding='utf-8') as f:
-        json.dump(metadata, f, ensure_ascii=False)
 
-    _faiss_index = index
-    _faiss_metadata = metadata
+    try:
+        # Escreve arquivos com sucesso antes de atualizar cache global
+        faiss.write_index(index, str(FAISS_INDEX_FILE))
+        with open(FAISS_META_FILE, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, ensure_ascii=False)
+
+        # APENAS após sucesso de ambas as escritas, atualiza globais
+        _faiss_index = index
+        _faiss_metadata = metadata
+
+    except (IOError, OSError, Exception) as e:
+        logger.error(f"Erro ao salvar índice FAISS: {e}")
+        # Garante que globais permanecem None em caso de erro
+        _faiss_index = None
+        _faiss_metadata = None
+        raise
 
 
 def build_faiss_index(force: bool = False, log_rebuild: bool = False) -> Dict:
@@ -589,10 +618,8 @@ def build_faiss_index(force: bool = False, log_rebuild: bool = False) -> Dict:
     faiss.normalize_L2(embeddings)  # Normaliza para cosine similarity
     index.add(embeddings)
 
-    # Salva índice
-    save_faiss_index(index, {"texts": texts, "meta": metadata})
-
-    # Salva estado do rebuild
+    # Salva estado do rebuild ANTES de save_faiss_index para garantir atomicidade
+    # Se save falhar, rebuild_state não é atualizado
     current_hash = compute_documents_hash(doc_index)
     rebuild_state = {
         "documents_hash": current_hash,
@@ -601,13 +628,15 @@ def build_faiss_index(force: bool = False, log_rebuild: bool = False) -> Dict:
         "documents_processed": processed_files,
         "documents_skipped": skipped_files
     }
+
+    # Salva índice (se falhar, rebuild_state não é salvo)
+    save_faiss_index(index, {"texts": texts, "meta": metadata})
+
+    # Salva rebuild_state APÓS sucesso do save_faiss_index
     save_rebuild_state(rebuild_state)
 
     # Invalida cache de queries após rebuild
     invalidate_query_cache()
-
-    # Limpa cache em memória para forçar recarga
-    clear_index_cache()
 
     elapsed_time = time.time() - start_time
 

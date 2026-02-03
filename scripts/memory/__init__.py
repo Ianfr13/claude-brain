@@ -159,6 +159,20 @@ from .jobs import (
     get_job_count,
 )
 
+# ============ QUERY DECOMPOSER ============
+from .query_decomposer import (
+    decompose_query,
+    QueryDecomposer,
+    DecompositionResult,
+    SubQuery,
+)
+
+# ============ ENSEMBLE SEARCH ============
+from .ensemble_search import (
+    ensemble_search,
+    SearchResult,
+)
+
 
 # ============ EXPORTS ============
 # Lista completa para import * (nao recomendado, mas mantido para compatibilidade)
@@ -198,6 +212,10 @@ __all__ = [
     'decay_unused', 'boost_confirmed', 'get_decision_score_components',
     # Job Queue
     'create_job', 'get_job', 'list_jobs', 'delete_job', 'cleanup_jobs', 'get_job_count',
+    # Query Decomposer
+    'decompose_query', 'QueryDecomposer', 'DecompositionResult', 'SubQuery',
+    # Ensemble Search
+    'ensemble_search', 'SearchResult',
 ]
 
 

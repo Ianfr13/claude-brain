@@ -31,6 +31,8 @@ from scripts.cli import (
     cmd_learn, cmd_learnings, cmd_solve,
     # Graph
     cmd_entity, cmd_relate, cmd_graph,
+    # Agentic
+    cmd_agentic_ask,
     # RAG
     cmd_index, cmd_search, cmd_context, cmd_ask, cmd_related,
     # Preferences
@@ -123,8 +125,17 @@ def main():
     p = subparsers.add_parser("relate")
     p.add_argument("relation", nargs="*")
 
-    p = subparsers.add_parser("graph")
-    p.add_argument("entity", nargs="*")
+    p = subparsers.add_parser("graph", help="Comandos avançados do knowledge graph")
+    p.add_argument("entity", nargs="*", help="[subcomando] ou [entidade]")
+    p.add_argument("--depth", type=int, default=2, help="Profundidade da traversal (default: 2)")
+    p.add_argument("--relation", help="Filtro de tipo de relacao (ex: uses, maintains)")
+    p.add_argument("--top", type=int, default=10, help="Quantidade de top nós para pagerank (default: 10)")
+
+    # Agentic Ask - Busca inteligente com ensemble
+    p = subparsers.add_parser("agentic-ask", help="Busca inteligente com decomposicao de query e ensemble")
+    p.add_argument("query", nargs="*", help="Query para buscar (pode usar AND/OR)")
+    p.add_argument("-p", "--project", help="Projeto especifico para priorizar")
+    p.add_argument("--explain", action="store_true", help="Mostra explicacao detalhada do processo")
 
     # ============ PREFERENCIAS ============
 
@@ -265,6 +276,8 @@ def main():
         "entity": cmd_entity,
         "relate": cmd_relate,
         "graph": cmd_graph,
+        # Agentic
+        "agentic-ask": cmd_agentic_ask,
         # Preferences
         "prefer": cmd_prefer,
         "prefs": cmd_prefs,

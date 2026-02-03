@@ -38,6 +38,9 @@ from .learnings import cmd_learn, cmd_learnings, cmd_solve
 # Graph - Comandos do knowledge graph
 from .graph import cmd_entity, cmd_relate, cmd_graph
 
+# Agentic - Busca inteligente com ensemble
+from .agentic import cmd_agentic_ask
+
 # RAG - Comandos de busca semantica
 from .rag import cmd_index, cmd_search, cmd_context, cmd_ask, cmd_related
 
@@ -72,6 +75,8 @@ __all__ = [
     'cmd_learn', 'cmd_learnings', 'cmd_solve',
     # Graph
     'cmd_entity', 'cmd_relate', 'cmd_graph',
+    # Agentic
+    'cmd_agentic_ask',
     # RAG
     'cmd_index', 'cmd_search', 'cmd_context', 'cmd_ask', 'cmd_related',
     # Preferences

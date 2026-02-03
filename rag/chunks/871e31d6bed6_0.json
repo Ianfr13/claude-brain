@@ -1,0 +1,12 @@
+{
+  "id": "871e31d6bed6_0",
+  "text": "# Test Document\n\nEste \u00e9 um documento de teste para FAISS RAG.\n# Test Document\n\nEste \u00e9 um documento de teste para FAISS RAG.\n# Test Document\n\nEste \u00e9 um documento de teste para FAISS RAG.\n# Test Document\n\nEste \u00e9 um documento de teste para FAISS RAG.\n# Test Document\n\nEste \u00e9 um documento de teste para FAISS RAG.\n# Test Document\n\nEste \u00e9 um documento de teste para FAISS RAG.\n# Test Document\n\nEste \u00e9 um documento de teste para FAISS RAG.\n# Test Document\n\nEste \u00e9 um documento de teste para FAISS RAG.",
+  "source": "/tmp/faiss_test/test.md",
+  "doc_type": "markdown",
+  "position": 0,
+  "total_chunks": 8,
+  "metadata": {
+    "filename": "test.md"
+  },
+  "indexed_at": "2026-02-03T20:14:30.950425"
+}

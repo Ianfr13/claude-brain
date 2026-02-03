@@ -410,11 +410,17 @@ Claude Brain - Sistema de Memoria Inteligente
 | brain context <query>            Contexto para Claude       |
 | brain related <arquivo>          Documentos relacionados    |
 +-------------------------------------------------------------+
-| KNOWLEDGE GRAPH                                             |
+| KNOWLEDGE GRAPH & AGENTIC                                   |
 +-------------------------------------------------------------+
 | brain entity <nome> <tipo>       Cria/atualiza entidade     |
 | brain relate <de> <para> <rel>   Cria relacao               |
 | brain graph <entidade>           Mostra grafo               |
+| brain graph sync                 Sincroniza com Neo4j       |
+| brain graph traverse <no> [--depth 2] [--relation uses]     |
+| brain graph path <source> <target>  Caminho mais curto      |
+| brain graph pagerank [--top 10]  Calcula PageRank dos nos   |
+| brain graph stats                Estatisticas do grafo      |
+| brain agentic-ask '<query>'      Busca inteligente ensemble |
 +-------------------------------------------------------------+
 | PREFERENCIAS & PADROES                                      |
 +-------------------------------------------------------------+
@@ -447,6 +453,12 @@ Exemplos:
   brain search "como configurar auth"
   brain entity "redis" "technology" "Cache layer"
   brain relate "meu-projeto" "redis" "uses"
+  brain graph stats                        # Mostra estatísticas do grafo
+  brain graph traverse redis --depth 2     # Traversa desde redis
+  brain graph path redis fastapi           # Caminho mais curto
+  brain graph pagerank --top 5             # Top 5 nós por importância
+  brain agentic-ask "redis cache ttl"      # Busca inteligente com ensemble
+  brain agentic-ask "api design" --explain # Com explicação do processo
   brain delete decisions 15 -f
   brain forget "redis config" --execute
 """)

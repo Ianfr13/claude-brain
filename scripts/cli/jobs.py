@@ -33,6 +33,10 @@ from scripts.memory.jobs import (
     check_cli_tools,
     create_cli_builder_job,
     get_missing_cli_tools,
+    create_job_with_subtasks,
+    get_job_subtasks,
+    update_subtask_status,
+    consolidate_subtask_results,
 )
 
 from .base import Colors, c, print_success, print_error, print_info
@@ -460,6 +464,169 @@ def cmd_cli_list(args):
         print()
 
 
+def cmd_job_create_distributed(args):
+    """Cria um job distribuído com múltiplas sub-tasks.
+
+    Uso:
+        brain job create --distributed --ttl 60 --prompt "Busca" --subtask 'query1' --subtask 'query2'
+    """
+    if not hasattr(args, 'prompt') or not args.prompt:
+        print_error("Obrigatorio: --prompt")
+        sys.exit(1)
+
+    if not hasattr(args, 'subtask') or not args.subtask:
+        print_error("Obrigatorio: pelo menos um --subtask")
+        sys.exit(1)
+
+    subtasks = args.subtask if isinstance(args.subtask, list) else [args.subtask]
+
+    data = {"prompt": " ".join(args.prompt) if isinstance(args.prompt, list) else args.prompt}
+
+    if hasattr(args, 'skills') and args.skills:
+        skills = args.skills if isinstance(args.skills, list) else [args.skills]
+        data["skills"] = skills
+
+    if hasattr(args, 'files') and args.files:
+        data["files"] = args.files if isinstance(args.files, list) else [args.files]
+
+    try:
+        job_id = create_job_with_subtasks(ttl=args.ttl, data=data, subtasks=subtasks)
+        print_success(f"Job distribuído criado: {job_id}")
+        print_info(f"Sub-tasks: {len(subtasks)}")
+        for i, st in enumerate(subtasks, 1):
+            print_info(f"  {i}. {st}")
+    except Exception as e:
+        print_error(f"Erro ao criar job: {e}")
+        sys.exit(1)
+
+
+def cmd_job_subtasks(args):
+    """Lista sub-tasks de um job distribuído.
+
+    Uso:
+        brain job subtasks <job_id>
+        brain job subtasks <job_id> --json
+    """
+    if not args.job_id:
+        print_error("Obrigatorio: job_id")
+        sys.exit(1)
+
+    subtasks = get_job_subtasks(args.job_id)
+
+    if subtasks is None:
+        print_error(f"Job nao encontrado: {args.job_id}")
+        sys.exit(1)
+
+    if not subtasks:
+        print_info("Nenhuma sub-task neste job")
+        return
+
+    if hasattr(args, 'json') and args.json:
+        print(json.dumps(subtasks, indent=2))
+    else:
+        print(c(f"\nSub-tasks do job {args.job_id}:\n", Colors.BOLD))
+        for st in subtasks:
+            status_icon = {
+                "pending": c("○", Colors.DIM),
+                "running": c("◉", Colors.CYAN),
+                "completed": c("✓", Colors.GREEN),
+                "failed": c("✗", Colors.RED)
+            }.get(st.get("status", "pending"), "?")
+
+            print(f"  {status_icon} {st['sub_task_id']}: {st['query']}")
+            if st.get("agent_id"):
+                print(c(f"      Agent: {st['agent_id']}", Colors.DIM))
+            if st.get("result"):
+                result_preview = st['result'][:80] if len(st['result']) > 80 else st['result']
+                print(c(f"      Resultado: {result_preview}", Colors.DIM))
+            print()
+
+
+def cmd_job_dispatch(args):
+    """Dispara workers para executar sub-tasks em background.
+
+    Uso:
+        brain job dispatch <job_id>
+        brain job dispatch <job_id> --model haiku
+    """
+    if not args.job_id:
+        print_error("Obrigatorio: job_id")
+        sys.exit(1)
+
+    job = get_job(args.job_id)
+    if not job:
+        print_error(f"Job nao encontrado: {args.job_id}")
+        sys.exit(1)
+
+    if job.get("type") != "distributed_search":
+        print_error(f"Job {args.job_id} nao e do tipo distribuido")
+        sys.exit(1)
+
+    subtasks = job.get("sub_tasks", [])
+    if not subtasks:
+        print_error("Job nao tem sub-tasks")
+        sys.exit(1)
+
+    # Simula dispatch - em producao usaria Task tool
+    model = getattr(args, 'model', 'haiku')
+
+    print_success(f"Dispachando {len(subtasks)} sub-tasks com modelo {model}")
+    print_info("Dica: Em producao, use Task tool com run_in_background=True")
+
+    for st in subtasks:
+        sub_task_id = st["sub_task_id"]
+        query = st["query"]
+
+        # Atualiza status para "running"
+        update_subtask_status(job.get("job_id"), sub_task_id, "running", agent_id=f"agent_{model}")
+
+        print_info(f"  [{sub_task_id}] Executando: {query}")
+
+    print_success("Dispatch iniciado. Monitorar com: brain job subtasks <job_id>")
+
+
+def cmd_job_consolidate(args):
+    """Consolida resultados de todas sub-tasks completadas.
+
+    Uso:
+        brain job consolidate <job_id>
+        brain job consolidate <job_id> --json
+    """
+    if not args.job_id:
+        print_error("Obrigatorio: job_id")
+        sys.exit(1)
+
+    job = get_job(args.job_id)
+    if not job:
+        print_error(f"Job nao encontrado: {args.job_id}")
+        sys.exit(1)
+
+    result = consolidate_subtask_results(args.job_id)
+
+    if result is None:
+        print_error("Nao foi possivel consolidar (job invalido ou sub-tasks incompletas)")
+        sys.exit(1)
+
+    if hasattr(args, 'json') and args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(c(f"\nResultados Consolidados: {args.job_id}\n", Colors.BOLD))
+        print(c(f"  Total: {result['total_tasks']}", Colors.DIM))
+        print(c(f"  Sucesso: {result['completed']}", Colors.GREEN))
+        print(c(f"  Falhas: {result['failed']}", Colors.RED))
+        print()
+
+        print(c("Resultados:\n", Colors.BOLD))
+        for res in result["results"]:
+            status_color = Colors.GREEN if res["status"] == "completed" else Colors.RED
+            print(c(f"  [{res['sub_task_id']}]", Colors.CYAN) + c(f" {res['status']}", status_color))
+            print(c(f"    Query: {res['query']}", Colors.DIM))
+            if res.get("result"):
+                result_preview = res['result'][:100] if len(res['result']) > 100 else res['result']
+                print(c(f"    Resultado: {result_preview}", Colors.DIM))
+            print()
+
+
 def cmd_job_tools(args):
     """Verifica status das ferramentas CLI requeridas por um job.
 
@@ -534,6 +701,9 @@ def cmd_job(args):
     - history: Exibe historico de iteracoes
     - status: Exibe/atualiza status
     - tools: Verifica ferramentas requeridas
+    - subtasks: Lista sub-tasks de job distribuído
+    - dispatch: Dispara workers para sub-tasks
+    - consolidate: Consolida resultados de sub-tasks
     """
     subcommands = {
         "create": cmd_job_create,
@@ -546,10 +716,13 @@ def cmd_job(args):
         "history": cmd_job_history,
         "status": cmd_job_status,
         "tools": cmd_job_tools,
+        "subtasks": cmd_job_subtasks,
+        "dispatch": cmd_job_dispatch,
+        "consolidate": cmd_job_consolidate,
     }
 
     if not hasattr(args, 'action') or not args.action:
-        print_error("Subcomando obrigatorio: create|get|list|cleanup|delete|stats|iterate|history|status|tools")
+        print_error("Subcomando obrigatorio: create|get|list|cleanup|delete|stats|iterate|history|status|tools|subtasks|dispatch|consolidate")
         sys.exit(1)
 
     if args.action not in subcommands:

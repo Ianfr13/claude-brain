@@ -76,7 +76,11 @@ def _init_jobs_table():
                 iteration INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'pending',
                 tools_required JSON DEFAULT '[]',
-                history JSON DEFAULT '[]'
+                history JSON DEFAULT '[]',
+
+                type TEXT DEFAULT 'normal',
+                sub_tasks JSON DEFAULT '[]',
+                consolidated_result JSON DEFAULT 'null'
             )
         ''')
         c.execute('CREATE INDEX IF NOT EXISTS idx_jobs_expires ON jobs(expires_at)')
@@ -97,6 +101,24 @@ def _init_jobs_table():
             pass
         try:
             c.execute('ALTER TABLE jobs ADD COLUMN history JSON DEFAULT "[]"')
+        except Exception:
+            pass
+        try:
+            c.execute('ALTER TABLE jobs ADD COLUMN type TEXT DEFAULT "normal"')
+        except Exception:
+            pass
+        try:
+            c.execute('ALTER TABLE jobs ADD COLUMN sub_tasks JSON DEFAULT "[]"')
+        except Exception:
+            pass
+        try:
+            c.execute('ALTER TABLE jobs ADD COLUMN consolidated_result JSON DEFAULT "null"')
+        except Exception:
+            pass
+
+        # Criar indices depois que colunas existem
+        try:
+            c.execute('CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type)')
         except Exception:
             pass
 
@@ -202,6 +224,9 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
             "status": "pending",
             "tools_required": [],
             "history": [],
+            "type": "normal" | "distributed_search",
+            "sub_tasks": [],
+            "consolidated_result": null,
             "data": {
                 "prompt": "...",
                 "skills": [...],
@@ -217,7 +242,7 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     with get_db() as conn:
         c = conn.cursor()
         c.execute('''
-            SELECT job_id, created_at, ttl, expires_at, iteration, status, tools_required, history, data
+            SELECT job_id, created_at, ttl, expires_at, iteration, status, tools_required, history, data, type, sub_tasks, consolidated_result
             FROM jobs
             WHERE job_id = ?
         ''', (job_id,))
@@ -236,7 +261,10 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
         "status": row[5],
         "tools_required": json.loads(row[6]) if row[6] else [],
         "history": json.loads(row[7]) if row[7] else [],
-        "data": json.loads(row[8])
+        "data": json.loads(row[8]),
+        "type": row[9] or "normal",
+        "sub_tasks": json.loads(row[10]) if row[10] else [],
+        "consolidated_result": json.loads(row[11]) if row[11] else None
     }
 
 
@@ -269,14 +297,14 @@ def list_jobs(include_expired: bool = False, status_filter: Optional[str] = None
         if include_expired:
             if status_filter:
                 c.execute('''
-                    SELECT job_id, created_at, ttl, expires_at, iteration, status, tools_required, history, data
+                    SELECT job_id, created_at, ttl, expires_at, iteration, status, tools_required, history, data, type, sub_tasks, consolidated_result
                     FROM jobs
                     WHERE status = ?
                     ORDER BY expires_at DESC
                 ''', (status_filter,))
             else:
                 c.execute('''
-                    SELECT job_id, created_at, ttl, expires_at, iteration, status, tools_required, history, data
+                    SELECT job_id, created_at, ttl, expires_at, iteration, status, tools_required, history, data, type, sub_tasks, consolidated_result
                     FROM jobs
                     ORDER BY expires_at DESC
                 ''')
@@ -284,14 +312,14 @@ def list_jobs(include_expired: bool = False, status_filter: Optional[str] = None
             now = datetime.now().isoformat()
             if status_filter:
                 c.execute('''
-                    SELECT job_id, created_at, ttl, expires_at, iteration, status, tools_required, history, data
+                    SELECT job_id, created_at, ttl, expires_at, iteration, status, tools_required, history, data, type, sub_tasks, consolidated_result
                     FROM jobs
                     WHERE expires_at >= ? AND status = ?
                     ORDER BY expires_at DESC
                 ''', (now, status_filter))
             else:
                 c.execute('''
-                    SELECT job_id, created_at, ttl, expires_at, iteration, status, tools_required, history, data
+                    SELECT job_id, created_at, ttl, expires_at, iteration, status, tools_required, history, data, type, sub_tasks, consolidated_result
                     FROM jobs
                     WHERE expires_at >= ?
                     ORDER BY expires_at DESC
@@ -309,7 +337,10 @@ def list_jobs(include_expired: bool = False, status_filter: Optional[str] = None
             "status": row[5],
             "tools_required": json.loads(row[6]) if row[6] else [],
             "history": json.loads(row[7]) if row[7] else [],
-            "data": json.loads(row[8])
+            "data": json.loads(row[8]),
+            "type": row[9] or "normal",
+            "sub_tasks": json.loads(row[10]) if row[10] else [],
+            "consolidated_result": json.loads(row[11]) if row[11] else None
         }
         for row in rows
     ]
@@ -704,6 +735,191 @@ def get_missing_cli_tools(job_id: str) -> List[str]:
     return missing
 
 
+def create_job_with_subtasks(ttl: int, data: Dict[str, Any], subtasks: List[str]) -> str:
+    """Cria um job distribuído com sub-tasks.
+
+    Args:
+        ttl: Time to live em segundos
+        data: Dicionario com prompt, skills, etc
+        subtasks: Lista de queries para sub-tasks
+
+    Returns:
+        job_id do job distribuído
+    """
+    _init_jobs_table()
+
+    if not subtasks or not isinstance(subtasks, list):
+        raise ValueError("subtasks deve ser uma lista não vazia")
+
+    # Normaliza dados
+    job_data = {
+        "prompt": data.get("prompt", "Busca distribuída"),
+        "skills": data.get("skills", []),
+        "brain_queries": data.get("brain_queries", []),
+        "files": data.get("files", []),
+        "context": data.get("context", {})
+    }
+
+    # Cria estrutura de sub-tasks
+    sub_tasks = [
+        {
+            "sub_task_id": f"sub_{i}",
+            "query": query,
+            "agent_id": None,
+            "status": "pending",
+            "result": None
+        }
+        for i, query in enumerate(subtasks, 1)
+    ]
+
+    # Cria job com tipo "distributed_search"
+    job_id = str(uuid.uuid4())
+    created_at = datetime.now()
+    expires_at = created_at + timedelta(seconds=ttl)
+
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO jobs (job_id, created_at, ttl, expires_at, data, type, sub_tasks)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            job_id,
+            created_at.isoformat(),
+            ttl,
+            expires_at.isoformat(),
+            json.dumps(job_data),
+            "distributed_search",
+            json.dumps(sub_tasks)
+        ))
+
+    logger.info(f"Job distribuído criado: {job_id} com {len(subtasks)} sub-tasks")
+    return job_id
+
+
+def get_job_subtasks(job_id: str) -> Optional[List[Dict[str, Any]]]:
+    """Retorna sub-tasks de um job.
+
+    Args:
+        job_id: ID do job
+
+    Returns:
+        Lista de sub-tasks ou None se job não existir
+    """
+    _init_jobs_table()
+
+    job = get_job(job_id)
+    if not job:
+        return None
+
+    return job.get("sub_tasks", [])
+
+
+def update_subtask_status(job_id: str, sub_task_id: str, status: str, result: Optional[str] = None, agent_id: Optional[str] = None) -> bool:
+    """Atualiza status de uma sub-task.
+
+    Args:
+        job_id: ID do job
+        sub_task_id: ID da sub-task (ex: 'sub_1')
+        status: Novo status ('pending', 'running', 'completed')
+        result: Resultado da execução (opcional)
+        agent_id: ID do agente que executou (opcional)
+
+    Returns:
+        True se atualizado, False se job/sub_task não existir
+    """
+    _init_jobs_table()
+
+    if status not in ('pending', 'running', 'completed', 'failed'):
+        raise ValueError(f"Status inválido: {status}")
+
+    with get_db() as conn:
+        c = conn.cursor()
+
+        # Carrega job atual
+        c.execute('SELECT sub_tasks FROM jobs WHERE job_id = ?', (job_id,))
+        row = c.fetchone()
+
+        if not row:
+            return False
+
+        sub_tasks = json.loads(row[0]) if row[0] else []
+
+        # Encontra e atualiza sub-task
+        found = False
+        for st in sub_tasks:
+            if st["sub_task_id"] == sub_task_id:
+                st["status"] = status
+                if result is not None:
+                    st["result"] = result
+                if agent_id is not None:
+                    st["agent_id"] = agent_id
+                found = True
+                break
+
+        if not found:
+            return False
+
+        # Salva de volta
+        c.execute('UPDATE jobs SET sub_tasks = ? WHERE job_id = ?', (json.dumps(sub_tasks), job_id))
+
+    logger.info(f"Sub-task atualizada: {job_id}/{sub_task_id} → {status}")
+    return True
+
+
+def consolidate_subtask_results(job_id: str) -> Optional[Dict[str, Any]]:
+    """Consolida resultados de todas sub-tasks.
+
+    Aguarda que TODAS sub-tasks estejam em status 'completed' ou 'failed'.
+
+    Args:
+        job_id: ID do job distribuído
+
+    Returns:
+        Dict com resultado consolidado ou None se job não existir
+    """
+    _init_jobs_table()
+
+    job = get_job(job_id)
+    if not job:
+        return None
+
+    sub_tasks = job.get("sub_tasks", [])
+    if not sub_tasks:
+        return None
+
+    # Verifica se todas completaram
+    completed_tasks = [st for st in sub_tasks if st["status"] in ("completed", "failed")]
+    if len(completed_tasks) < len(sub_tasks):
+        logger.warning(f"Nem todas sub-tasks completaram para {job_id}")
+        return None
+
+    # Consolida resultados
+    consolidated = {
+        "job_id": job_id,
+        "total_tasks": len(sub_tasks),
+        "completed": len([st for st in sub_tasks if st["status"] == "completed"]),
+        "failed": len([st for st in sub_tasks if st["status"] == "failed"]),
+        "results": [
+            {
+                "sub_task_id": st["sub_task_id"],
+                "query": st["query"],
+                "status": st["status"],
+                "result": st["result"]
+            }
+            for st in sub_tasks
+        ],
+        "consolidated_at": datetime.now().isoformat()
+    }
+
+    # Salva consolidated_result
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute('UPDATE jobs SET consolidated_result = ? WHERE job_id = ?', (json.dumps(consolidated), job_id))
+
+    logger.info(f"Resultados consolidados para {job_id}: {consolidated['completed']}/{consolidated['total_tasks']} sucesso")
+    return consolidated
+
+
 __all__ = [
     'create_job',
     'get_job',
@@ -717,4 +933,8 @@ __all__ = [
     'check_cli_tools',
     'create_cli_builder_job',
     'get_missing_cli_tools',
+    'create_job_with_subtasks',
+    'get_job_subtasks',
+    'update_subtask_status',
+    'consolidate_subtask_results',
 ]

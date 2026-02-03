@@ -34,6 +34,7 @@ def init_metrics():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 action TEXT NOT NULL,
                 category TEXT,
+                project TEXT,
                 query TEXT,
                 results_count INTEGER DEFAULT 0,
                 top_score REAL,
@@ -53,20 +54,33 @@ def init_metrics():
                 not_useful_count INTEGER DEFAULT 0
             )
         ''')
+
+        # Adiciona coluna project se ela não existir (para tabelas existentes)
+        try:
+            c.execute('PRAGMA table_info(metrics)')
+            columns = {row[1] for row in c.fetchall()}
+            if 'project' not in columns:
+                c.execute('ALTER TABLE metrics ADD COLUMN project TEXT')
+        except Exception:
+            # Se houver erro, ignora (a coluna pode já existir)
+            pass
+
+        # Cria indices
         c.execute('CREATE INDEX IF NOT EXISTS idx_metrics_action ON metrics(action)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_metrics_date ON metrics(created_at)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_metrics_project ON metrics(project)')
 
 
 def log_action(action: str, category: str = None, query: str = None,
-               results_count: int = 0, top_score: float = None) -> int:
+               results_count: int = 0, top_score: float = None, project: str = None) -> int:
     """Registra uma ação do brain"""
     init_metrics()
     with get_db() as conn:
         c = conn.cursor()
         c.execute('''
-            INSERT INTO metrics (action, category, query, results_count, top_score)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (action, category, query, results_count, top_score))
+            INSERT INTO metrics (action, category, project, query, results_count, top_score)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (action, category, project, query, results_count, top_score))
 
         # Atualiza stats diárias
         today = datetime.now().strftime("%Y-%m-%d")
@@ -180,7 +194,7 @@ def get_recent_actions(limit: int = 20) -> List[Dict]:
     with get_db() as conn:
         c = conn.cursor()
         c.execute('''
-            SELECT action, category, query, results_count, top_score, useful, created_at
+            SELECT action, category, project, query, results_count, top_score, useful, created_at
             FROM metrics
             ORDER BY created_at DESC LIMIT ?
         ''', (limit,))

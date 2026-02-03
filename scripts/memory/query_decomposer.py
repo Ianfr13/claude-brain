@@ -86,6 +86,36 @@ ANTHROPIC_MODELS = [
     "claude-3-haiku-20240307",     # fallback
 ]
 
+# ============ INPUT VALIDATION ============
+
+def sanitize_query(query: str, max_len: int = 500) -> str:
+    """Sanitiza query para prevenir injection e overflow.
+
+    Args:
+        query: Query a sanitizar
+        max_len: Comprimento máximo permitido (default: 500)
+
+    Returns:
+        Query sanitizada
+
+    Raises:
+        ValueError: Se query exceder max_len ou for inválida
+    """
+    if not query or not isinstance(query, str):
+        raise ValueError("Query deve ser uma string não-vazia")
+
+    query = query.strip()
+
+    if len(query) > max_len:
+        raise ValueError(f"Query excede limite de {max_len} caracteres ({len(query)} recebidos)")
+
+    # Remove caracteres de controle e normaliza espaço
+    query = " ".join(query.split())
+
+    logger.debug(f"Query sanitizada: {len(query)} chars")
+    return query
+
+
 DECOMPOSITION_PROMPT = """Você é um especialista em decomposição semântica de queries.
 
 Analyze a seguinte query e decomponha-a em sub-queries otimizadas para busca RAG:
@@ -147,6 +177,13 @@ class OpenRouterDecomposer:
         """
         if not self.available:
             logger.warning("OpenRouter não disponível - pulando")
+            return None
+
+        # Valida e sanitiza query
+        try:
+            query = sanitize_query(query)
+        except ValueError as e:
+            logger.error(f"Query inválida: {e}")
             return None
 
         prompt = DECOMPOSITION_PROMPT.format(query=query)
@@ -270,6 +307,13 @@ class AnthropicDecomposer:
             logger.warning("Anthropic não disponível - pulando")
             return None
 
+        # Valida e sanitiza query
+        try:
+            query = sanitize_query(query)
+        except ValueError as e:
+            logger.error(f"Query inválida: {e}")
+            return None
+
         prompt = DECOMPOSITION_PROMPT.format(query=query)
 
         try:
@@ -351,6 +395,22 @@ class QueryDecomposer:
         """
         import time
         start_time = time.time()
+
+        # Valida query
+        try:
+            query = sanitize_query(query)
+        except ValueError as e:
+            logger.error(f"Query inválida: {e}")
+            return DecompositionResult(
+                original_query=query,
+                sub_queries=[],
+                decomposition_confidence=0.0,
+                provider="none",
+                model_used="none",
+                timestamp=datetime.now().isoformat(),
+                processing_time_ms=(time.time() - start_time) * 1000,
+                error=str(e)
+            )
 
         logger.info(f"Iniciando decomposição: '{query}'")
 

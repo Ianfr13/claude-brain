@@ -302,7 +302,7 @@ wait_for_neo4j() {
     local elapsed=0
 
     while [[ $elapsed -lt $NEO4J_TIMEOUT ]]; do
-        if docker-compose exec -T neo4j cypher-shell -u neo4j -p brainpassword "RETURN 1" &>/dev/null; then
+        if docker-compose exec -T neo4j cypher-shell -u "${NEO4J_USER:-neo4j}" -p "${NEO4J_PASSWORD}" "RETURN 1" &>/dev/null; then
             log_success "Neo4j is ready (${elapsed}s)"
             return 0
         fi
@@ -324,7 +324,7 @@ wait_for_redis() {
     local elapsed=0
 
     while [[ $elapsed -lt $REDIS_TIMEOUT ]]; do
-        if docker-compose exec -T redis redis-cli -a brainredis ping &>/dev/null; then
+        if docker-compose exec -T redis redis-cli -a "${REDIS_PASSWORD}" ping &>/dev/null; then
             log_success "Redis is ready (${elapsed}s)"
             return 0
         fi
@@ -402,7 +402,7 @@ initialize_databases() {
 
     # Create Neo4j constraints and indexes
     log_info "Setting up Neo4j schema..."
-    if docker-compose exec -T neo4j cypher-shell -u neo4j -p brainpassword <<'EOF' &>/dev/null; then
+    if docker-compose exec -T neo4j cypher-shell -u "${NEO4J_USER:-neo4j}" -p "${NEO4J_PASSWORD}" <<'EOF' &>/dev/null; then
 CREATE CONSTRAINT IF NOT EXISTS FOR (n:Memory) REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT IF NOT EXISTS FOR (n:Learning) REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT IF NOT EXISTS FOR (n:Decision) REQUIRE n.id IS UNIQUE;
@@ -439,7 +439,7 @@ run_connectivity_tests() {
 
     # Test Neo4j connection
     tests_total=$((tests_total + 1))
-    if docker-compose exec -T neo4j cypher-shell -u neo4j -p brainpassword "RETURN 1" &>/dev/null; then
+    if docker-compose exec -T neo4j cypher-shell -u "${NEO4J_USER:-neo4j}" -p "${NEO4J_PASSWORD}" "RETURN 1" &>/dev/null; then
         log_success "Neo4j connectivity: OK"
         tests_passed=$((tests_passed + 1))
     else
@@ -448,7 +448,7 @@ run_connectivity_tests() {
 
     # Test Redis connection
     tests_total=$((tests_total + 1))
-    if docker-compose exec -T redis redis-cli -a brainredis ping &>/dev/null; then
+    if docker-compose exec -T redis redis-cli -a "${REDIS_PASSWORD}" ping &>/dev/null; then
         log_success "Redis connectivity: OK"
         tests_passed=$((tests_passed + 1))
     else

@@ -13,8 +13,12 @@ Comandos do knowledge graph:
 - cmd_graph_stats: Mostra estatísticas do grafo
 """
 
+import logging
+
 from .base import Colors, c, print_header, print_success, print_error, print_info
 from scripts.memory_store import save_entity, save_relation, get_entity_graph
+
+logger = logging.getLogger(__name__)
 
 
 def cmd_entity(args):
@@ -159,7 +163,8 @@ def _get_all_relations():
         columns = [description[0] for description in cursor.description]
         relations = [dict(zip(columns, row)) for row in rows]
         return relations
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Erro ao obter relações: {e}")
         return []
 
 
@@ -243,8 +248,8 @@ def _cmd_graph_traverse(args):
                         if relation_filter is None or r['relation_type'] == relation_filter:
                             if r['to_entity'] not in visited:
                                 queue.append((r['to_entity'], dist + 1, r['relation_type']))
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Erro ao carregar grafo de {current}: {e}")
 
         print_success(f"Visitados {len(visited)} nos")
     except Exception as e:
@@ -345,7 +350,8 @@ def _cmd_graph_pagerank(args):
                         )
                     else:
                         new_scores[entity] = (1 - damping)
-                except:
+                except Exception as e:
+                    logger.debug(f"Erro ao calcular score para {entity}: {e}")
                     new_scores[entity] = scores.get(entity, 1.0)
             scores = new_scores
 

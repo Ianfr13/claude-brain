@@ -312,7 +312,18 @@ def _search_neo4j(
     try:
         # Importação local para evitar erro se neo4j_wrapper não existir
         from .neo4j_wrapper import Neo4jGraph
-        graph = Neo4jGraph()
+        import os
+
+        # Inicializa com parâmetros do ambiente
+        uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+        user = os.environ.get("NEO4J_USER", "neo4j")
+        password = os.environ.get("NEO4J_PASSWORD")
+
+        if not password:
+            logger.warning("NEO4J_PASSWORD não configurada, pulando Neo4j")
+            return []
+
+        graph = Neo4jGraph(uri=uri, user=user, password=password)
 
         # Tenta busca graph (ex: graph traversal, relationship search)
         graph_results = graph.search_with_relationships(query, project, limit)

@@ -73,7 +73,7 @@ def ensemble_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
                     "score": 0.8,
                 })
     except Exception as e:
-        pass  # Silenciosamente falha
+        print_info(f"Decisions search failed: {e}")
 
     # Fonte 2: Learnings (via find_solution)
     try:
@@ -86,8 +86,8 @@ def ensemble_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
                 "content": solution.get('solution', str(solution)) if isinstance(solution, dict) else str(solution),
                 "score": 0.75,
             })
-    except Exception:
-        pass  # Silenciosamente falha
+    except Exception as e:
+        print_info(f"Learnings search failed: {e}")
 
     # Fonte 3: RAG (busca semântica)
     try:
@@ -115,8 +115,8 @@ def ensemble_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
                 "content": json.dumps(entity, indent=2),
                 "score": 0.65,
             })
-    except Exception:
-        pass
+    except Exception as e:
+        print_info(f"Entity graph search failed: {e}")
 
     # Ordena por score
     results.sort(key=lambda x: x.get("score", 0), reverse=True)

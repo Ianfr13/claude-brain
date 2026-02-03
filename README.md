@@ -119,6 +119,12 @@ claude-brain/
 
 O Claude Brain usa uma arquitetura de memória em camadas para otimizar performance e relevância:
 
+### Nível 0: JOBS (Fila Persistente) ← NEW
+- **Armazenamento**: SQLite com TTL automático (padrão 12h)
+- **Propósito**: Persistência de jobs com iterações e histórico
+- **Uso**: `brain job create/iterate/history/status`
+- **Quando**: Tarefas distribuídas, execução + revisão (Haiku → Opus)
+
 ### Nível 1: SESSÃO (Workflows)
 - **Armazenamento**: Arquivos Markdown (context.md, todos.md, insights.md)
 - **Propósito**: Contexto de trabalho atual sem gastar tokens
@@ -232,6 +238,157 @@ brain help  # Ver todos os comandos
 
 ---
 
+## ⚙️ Job Iterativo (NEW)
+
+Sistema de fila de jobs com iterações para execução e revisão distribuída. Ideal para tarefas longas, debug remoto e distribuição de trabalho.
+
+### Características
+
+- **TTL (Time To Live)**: Padrão 12h, jobs expiram automaticamente
+- **Iterações**: Tracking de execuções (Haiku) e revisões (Opus)
+- **Status**: Fluxo de estados (pending → executing → in_review → fixing → completed)
+- **Histórico**: Registro completo de todas as mudanças
+- **Auto-cleanup**: Limpeza automática de jobs expirados
+
+### Comandos
+
+```bash
+# Criar job
+brain job create --ttl 3600 \
+  --prompt "Implementar cache Redis" \
+  --skills python-pro-skill \
+  --brain-query "redis|vsl-analysis" \
+  --files /root/vsl-analysis/cache.py
+
+# Listar jobs ativos
+brain job list
+
+# Recuperar job
+brain job get <job_id>
+
+# Iterar (executar/revisar)
+brain job iterate <job_id> --type execution --agent haiku --result "Implementado"
+brain job iterate <job_id> --type review --agent opus --result "LGTM"
+
+# Ver histórico
+brain job history <job_id>
+
+# Gerenciar status
+brain job status <job_id>
+brain job status <job_id> --set in_review
+
+# Cleanup manual
+brain job cleanup
+
+# Estatísticas
+brain job stats
+```
+
+### Fluxo Completo (Haiku → Opus → Loop)
+
+```
+1. CREATE       → brain job create [job configurado]
+2. CHECK TOOLS  → brain job tools [verificar dependências]
+3. BUILD (opt)  → brain job tools --build-missing [criar CLIs]
+4. EXECUTE      → brain job iterate --type execution --agent haiku
+5. REVIEW       → brain job iterate --type review --agent opus
+6. ITERATE      → Se issues: status --set fixing → volta a 4
+               → Se LGTM: status --set completed
+```
+
+### Exemplo Prático
+
+```bash
+# 1. Criar job
+JOB_ID=$(brain job create --ttl 7200 \
+  --prompt "Otimizar queries do banco" \
+  --skills sql-pro-skill \
+  --brain-query "database optimization" \
+  | grep -oP 'Job criado: \K[^ ]+')
+
+# 2. Verificar ferramentas
+brain job tools "$JOB_ID"
+
+# 3. Haiku implementa
+brain job iterate "$JOB_ID" --type execution --agent haiku \
+  --result "Queries otimizadas com índices"
+
+# 4. Opus revisa
+brain job iterate "$JOB_ID" --type review --agent opus \
+  --result "Verificar timeout em transactions grandes"
+
+# 5. Status check
+brain job status "$JOB_ID"
+
+# 6. Se aceito, marcar como completo
+brain job status "$JOB_ID" --set completed
+
+# Ver histórico completo
+brain job history "$JOB_ID"
+```
+
+---
+
+## 🔧 CLI Management (NEW)
+
+Sistema automático de detecção e construção de ferramentas CLI personalizadas.
+
+### Características
+
+- **Auto-detecção**: Escaneia `/root/.claude/cli/` para ferramentas disponíveis
+- **Builder Jobs**: Cria jobs para construir CLIs faltando
+- **Validation**: Opus revisa CLIs antes de marcar como pronto
+- **Integration**: Detecta automaticamente `tools_required` em jobs
+
+### Comandos
+
+```bash
+# Listar CLIs disponíveis
+brain cli list
+
+# Ver CLIs com tipo
+brain cli list --json
+
+# Verificar ferramentas de um job
+brain job tools <job_id>
+
+# Criar job builder para CLIs faltando
+brain job tools <job_id> --build-missing
+```
+
+### Exemplo: Job com Ferramentas
+
+```bash
+# Criar job que requer CLIs customizadas
+JOB_ID=$(brain job create --ttl 3600 \
+  --prompt "Pipeline de ML" \
+  --context '{"tools_required":["ml-validator","data-processor"]}' \
+  | grep -oP 'Job criado: \K[^ ]+')
+
+# Verificar status
+brain job tools "$JOB_ID"
+# Saída: ✗ ml-validator, ✗ data-processor
+
+# Criar builder automaticamente
+BUILDER_ID=$(brain job tools "$JOB_ID" --build-missing | \
+  grep -oP 'Child job: \K[^ ]+')
+
+# Builder job é executado com iterações
+brain job iterate "$BUILDER_ID" --type execution --agent haiku \
+  --result "CLIs criadas em /root/.claude/cli/"
+
+brain job iterate "$BUILDER_ID" --type review --agent opus \
+  --result "APPROVED"
+
+brain job status "$BUILDER_ID" --set completed
+
+# Agora ferramentas estão disponíveis
+brain job tools "$JOB_ID"
+# ✓ ml-validator, ✓ data-processor
+```
+
+---
+
 ## 🔒 Segurança
 
 ✅ **Rate Limiting**: 30 req/min para /search, 60 req/min para /stats
@@ -265,8 +422,33 @@ pytest tests/test_faiss_rag.py -v        # 47 testes, 75% cobertura
 ## 📚 Documentação
 
 - **[QUICKSTART.md](docs/QUICKSTART.md)** - Tutorial 5 minutos para novos usuários
+- **[JOB_QUEUE.md](docs/JOB_QUEUE.md)** - Sistema de jobs iterativo com CLI management (12h TTL)
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Design system e decisões
 - **[.github/workflows/tests.yml](.github/workflows/tests.yml)** - CI/CD Pipeline
+
+---
+
+## ⏱️ TTL Recomendados
+
+Para escolher o TTL adequado ao criar jobs:
+
+| Duração | TTL (segundos) | Uso |
+|---------|----------------|-----|
+| 5 minutos | 300 | Debug rápido, testes |
+| 30 minutos | 1800 | Tarefa curta |
+| 1 hora | 3600 | Tarefa média |
+| 2 horas | 7200 | Sessão de trabalho |
+| 4 horas | 14400 | Sessão longa |
+| **12 horas** | **43200** | **Padrão recomendado** |
+| 1 dia | 86400 | Job agendado |
+
+```bash
+# Exemplo: Job com 12h (padrão)
+brain job create --ttl 43200 --prompt "Tarefa longa"
+
+# Ou deixar valor padrão (43200 se não especificar)
+brain job create --prompt "Tarefa" --skills python-pro-skill
+```
 
 ---
 
@@ -324,14 +506,16 @@ pytest tests/test_faiss_rag.py -v        # 47 testes, 75% cobertura
 ## 📊 Estatísticas
 
 ```
-Total de Commits: 23
-Linhas adicionadas: 7,000+
-Novos testes: 206+
-Cobertura: 6% → 48%
-Módulos: 2 → 22
+Total de Commits: 25+
+Linhas adicionadas: 10,000+
+Novos testes: 230+ (job iterativo + security)
+Cobertura: 6% → 48%+
+Módulos: 2 → 22+
 Security headers: 0 → 7
 Rate limiting: ✅
-Documentation: +75%
+Job Iterativo: ✅ NEW (TTL 12h, iteration tracking)
+CLI Management: ✅ NEW (auto-detection, builder jobs)
+Documentation: +75% → +85%
 Accessibility: WCAG F → A
 ```
 

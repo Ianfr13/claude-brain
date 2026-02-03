@@ -22,9 +22,9 @@ services:
       LOG_LEVEL: INFO
 
       # Model settings (offline mode)
-      HF_HUB_OFFLINE: 1
-      TOKENIZERS_PARALLELISM: false
-      EMBEDDING_MODEL: all-MiniLM-L6-v2
+      HF_HUB_OFFLINE: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      EMBEDDING_MODEL: "all-MiniLM-L6-v2"
 
       # Feature flags
       ENABLE_AUTO_REBUILD: "true"
@@ -42,7 +42,7 @@ services:
           memory: 2G
 
     # Restart policy
-    restart: unless-stopped
+    restart: always
 
     # Healthcheck
     healthcheck:
@@ -67,9 +67,9 @@ services:
   #     - "127.0.0.1:6379:6379"
   #   volumes:
   #     - redis-data:/data
-  #   restart: unless-stopped
+  #   restart: always
 
-volumes:
+# volumes:
   # redis-data:
   #   driver: local
 

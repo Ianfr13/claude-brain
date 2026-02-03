@@ -220,7 +220,7 @@ def main():
     p = subparsers.add_parser("job", help="Fila de jobs com TTL")
     p.add_argument("action", choices=["create", "get", "list", "cleanup", "delete", "stats", "iterate", "history", "status", "tools"])
     p.add_argument("job_id", nargs="?", help="ID do job (para get/delete/iterate/history/status/tools)")
-    p.add_argument("--ttl", type=int, help="Time to live em segundos (para create)")
+    p.add_argument("--ttl", type=int, default=43200, help="Time to live em segundos (para create, default: 12h)")
     p.add_argument("--data", help="JSON completo do job (para create)")
     p.add_argument("--prompt", nargs="*", help="Prompt do job (para create)")
     p.add_argument("--skills", action="append", help="Skills a usar (para create, pode repetir)")

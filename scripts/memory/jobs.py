@@ -250,8 +250,15 @@ def list_jobs(include_expired: bool = False, status_filter: Optional[str] = None
     Returns:
         Lista de jobs (mesmo formato de get_job)
         Ordenados por expires_at (mais recentes primeiro)
+
+    Raises:
+        ValueError: Se status_filter nao for um status valido
     """
     _init_jobs_table()
+
+    # SECURITY: Validar status_filter contra JOB_STATES para prevenir SQL injection
+    if status_filter is not None and status_filter not in JOB_STATES:
+        raise ValueError(f"Status invalido: {status_filter}. Opcoes validas: {', '.join(JOB_STATES.keys())}")
 
     if not include_expired:
         cleanup_jobs()
@@ -380,6 +387,9 @@ def iterate_job(job_id: str, iteration_type: str, agent: str, result: str) -> bo
 
     Raises:
         ValueError: Se iteration_type ou agent for invalido
+
+    SECURITY: Usa UPDATE atomico com WHERE status NOT IN terminal_states para prevenir
+    race conditions entre verificacao e atualizacao.
     """
     _init_jobs_table()
 
@@ -389,19 +399,10 @@ def iterate_job(job_id: str, iteration_type: str, agent: str, result: str) -> bo
     if agent not in ('haiku', 'opus'):
         raise ValueError(f"agent deve ser 'haiku' ou 'opus', recebido: {agent}")
 
-    job = get_job(job_id)
-    if not job:
-        return False
-
-    # Verifica se job esta em estado terminal
-    if job['status'] in TERMINAL_STATES:
-        logger.warning(f"Nao pode iterar job em estado terminal: {job['status']}")
-        return False
-
-    # Cria entrada do histórico
+    # Cria entrada do histórico (sem dependencia do estado atual)
     history_entry = {
         'timestamp': datetime.now().isoformat(),
-        'iteration': job['iteration'] + 1,
+        'iteration': None,  # Sera preenchido no UPDATE
         'type': iteration_type,
         'agent': agent,
         'result': result[:500],  # Limita resultado a 500 chars no histórico
@@ -413,27 +414,52 @@ def iterate_job(job_id: str, iteration_type: str, agent: str, result: str) -> bo
     with get_db() as conn:
         c = conn.cursor()
 
-        # Carrega histórico atual
-        c.execute('SELECT history FROM jobs WHERE job_id = ?', (job_id,))
+        # ATOMIC UPDATE: Verifica estado terminal E atualiza em uma unica operacao
+        # Isso previne race condition onde job muda de estado entre verificacao e update
+
+        # Primeiro, carrega o job para validacao
+        c.execute('SELECT job_id, status, history, iteration FROM jobs WHERE job_id = ?', (job_id,))
         row = c.fetchone()
-        if row:
-            current_history = json.loads(row[0]) if row[0] else []
-        else:
+
+        if not row:
             return False
 
-        # Adiciona nova entrada
+        current_status = row[1]
+        current_history = json.loads(row[2]) if row[2] else []
+        current_iteration = row[3]
+
+        # Verifica se esta em estado terminal
+        if current_status in TERMINAL_STATES:
+            logger.warning(f"Nao pode iterar job em estado terminal: {current_status}")
+            return False
+
+        # Atualiza history_entry com numero correto de iteracao
+        history_entry['iteration'] = current_iteration + 1
         current_history.append(history_entry)
 
-        # Atualiza job
-        c.execute('''
+        # UPDATE ATOMICO: Apenas atualiza se nao estiver em estado terminal
+        # Cria query parametrizada com WHERE clausula para estados terminais
+        # Construir placeholders dinamicamente para NOT IN
+        terminal_states_list = list(TERMINAL_STATES)
+        placeholders = ','.join('?' * len(terminal_states_list))
+
+        params = [new_status, json.dumps(current_history), job_id] + terminal_states_list
+
+        c.execute(f'''
             UPDATE jobs
             SET iteration = iteration + 1,
                 status = ?,
                 history = ?
-            WHERE job_id = ?
-        ''', (new_status, json.dumps(current_history), job_id))
+            WHERE job_id = ? AND status NOT IN ({placeholders})
+        ''', params)
 
-    logger.info(f"Job iterado: {job_id} (iteracao {job['iteration'] + 1}, {iteration_type} por {agent})")
+        # Verifica se UPDATE foi bem-sucedido (rowcount > 0)
+        if c.rowcount == 0:
+            # Job mudou de estado entre verificacao e update
+            logger.warning(f"Job nao pode ser iterado (estado mudou): {job_id}")
+            return False
+
+    logger.info(f"Job iterado: {job_id} (iteracao {current_iteration + 1}, {iteration_type} por {agent})")
     return True
 
 
@@ -543,6 +569,8 @@ def check_cli_tools(tools_required: List[str]) -> Dict[str, bool]:
             "gdrive": True,
             "missing-tool": False,
         }
+
+    SECURITY: Valida tool_name para prevenir path traversal attacks
     """
     from pathlib import Path
 
@@ -550,12 +578,34 @@ def check_cli_tools(tools_required: List[str]) -> Dict[str, bool]:
 
     result = {}
     for tool_name in tools_required:
-        # Verifica se existe diretorio ou arquivo com o nome da ferramenta
-        tool_path = cli_dir / tool_name
-        result[tool_name] = tool_path.exists()
+        # SECURITY: Validar tool_name para prevenir path traversal
+        # - Rejeita: '..', '/', '\', nulos
+        # - Permite: nomes normais, hifens, underscores, numeros
+        if not tool_name or '..' in tool_name or '/' in tool_name or '\\' in tool_name or '\0' in tool_name:
+            logger.warning(f"Tool name invalido (tentativa de path traversal?): {repr(tool_name)}")
+            result[tool_name] = False
+            continue
 
-        if not result[tool_name]:
-            logger.debug(f"Ferramenta nao encontrada: {tool_name} (esperado em {tool_path})")
+        # Resolve path para garantir que esta dentro de cli_dir
+        try:
+            tool_path = cli_dir / tool_name
+            # Valida que a path resolvida esta dentro do diretorio permitido
+            tool_path_resolved = tool_path.resolve()
+            cli_dir_resolved = cli_dir.resolve()
+
+            if not str(tool_path_resolved).startswith(str(cli_dir_resolved)):
+                logger.warning(f"Path traversal detectado: {tool_name} -> {tool_path_resolved}")
+                result[tool_name] = False
+                continue
+
+            result[tool_name] = tool_path.exists()
+
+            if not result[tool_name]:
+                logger.debug(f"Ferramenta nao encontrada: {tool_name} (esperado em {tool_path})")
+
+        except (ValueError, RuntimeError) as e:
+            logger.warning(f"Erro ao validar tool path {tool_name}: {e}")
+            result[tool_name] = False
 
     return result
 

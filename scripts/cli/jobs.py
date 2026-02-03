@@ -18,7 +18,7 @@ Uso interno:
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from scripts.memory.jobs import (
     create_job,
@@ -165,7 +165,9 @@ def cmd_job_create(args):
         job_id = create_job(ttl=args.ttl, data=data)
         print_success(f"Job criado: {job_id}")
         print_info(f"TTL: {_format_ttl(args.ttl)}")
-        print_info(f"Expira: {_format_timestamp((datetime.now().timestamp() + args.ttl).__str__())}")
+        # BUG FIX: Calcular expiracao corretamente usando isoformat() ao invés de timestamp
+        expires_at = (datetime.now() + timedelta(seconds=args.ttl)).isoformat()
+        print_info(f"Expira: {_format_timestamp(expires_at)}")
     except Exception as e:
         print_error(f"Erro ao criar job: {e}")
         sys.exit(1)

@@ -55,6 +55,9 @@ from scripts.memory.jobs import (
     delete_job,
     cleanup_jobs,
     get_job_count,
+    iterate_job,
+    check_cli_tools,
+    update_job_status,
 )
 
 
@@ -362,6 +365,231 @@ class TestJobStats(unittest.TestCase):
         # Cleanup
         delete_job(job_id_active)
         delete_job(job_id_expired)
+
+
+class TestListJobsSecurityValidation(unittest.TestCase):
+    """Testes de validacao de seguranca em list_jobs - SECURITY FIX #1."""
+
+    def setUp(self):
+        """Limpa banco antes de cada teste."""
+        cleanup_jobs()
+        # Deleta todos os jobs manualmente (incluindo expirados)
+        from scripts.memory.base import get_db
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute('DELETE FROM jobs')
+
+    def test_list_jobs_valid_status_filter(self):
+        """Testa que status_filter valido funciona."""
+        # Cria job com status pendente
+        job_id = create_job(ttl=3600, data={"prompt": "Teste"})
+
+        # Filtra por status valido (deve funcionar)
+        jobs = list_jobs(status_filter='pending')
+        assert len(jobs) == 1
+        assert jobs[0]['status'] == 'pending'
+
+        # Cleanup
+        delete_job(job_id)
+
+    def test_list_jobs_invalid_status_filter_raises_error(self):
+        """Testa que status_filter invalido levanta ValueError."""
+        with pytest.raises(ValueError, match="Status invalido"):
+            list_jobs(status_filter='invalid_status')
+
+    def test_list_jobs_sql_injection_attempt_blocked(self):
+        """Testa que tentativas de SQL injection sao bloqueadas."""
+        # Tentativas maliciosas devem ser rejeitadas
+        malicious_inputs = [
+            "pending' OR '1'='1",
+            "pending; DROP TABLE jobs;--",
+            "pending' UNION SELECT * FROM jobs--",
+        ]
+
+        for malicious_input in malicious_inputs:
+            with pytest.raises(ValueError, match="Status invalido"):
+                list_jobs(status_filter=malicious_input)
+
+
+class TestIterateJobSecurityRaceCondition(unittest.TestCase):
+    """Testes de race condition em iterate_job - SECURITY FIX #2."""
+
+    def setUp(self):
+        """Limpa banco antes de cada teste."""
+        cleanup_jobs()
+        from scripts.memory.base import get_db
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute('DELETE FROM jobs')
+
+    def test_iterate_job_valid_execution(self):
+        """Testa iteracao valida de job."""
+        data = {"prompt": "Teste iteracao"}
+        job_id = create_job(ttl=3600, data=data)
+
+        # Get job inicial para saber o iteration number
+        job_before = get_job(job_id)
+        initial_iteration = job_before['iteration']
+
+        # Itera com execution
+        success = iterate_job(job_id, 'execution', 'haiku', 'Resultado da execucao')
+        assert success is True
+
+        # Verifica que job foi atualizado
+        job = get_job(job_id)
+        assert job['iteration'] == initial_iteration + 1
+        assert job['status'] == 'executing'
+        assert len(job['history']) == 1
+        assert job['history'][0]['type'] == 'execution'
+        assert job['history'][0]['agent'] == 'haiku'
+
+        # Cleanup
+        delete_job(job_id)
+
+    def test_iterate_job_multiple_iterations(self):
+        """Testa multiplas iteracoes de um job."""
+        data = {"prompt": "Teste multiplas iteracoes"}
+        job_id = create_job(ttl=3600, data=data)
+
+        # Get inicial
+        job_initial = get_job(job_id)
+        initial_iter = job_initial['iteration']
+
+        # Iteracao 1: execution
+        iterate_job(job_id, 'execution', 'haiku', 'Resultado haiku')
+        job = get_job(job_id)
+        assert job['iteration'] == initial_iter + 1
+        assert job['status'] == 'executing'
+
+        # Iteracao 2: review
+        iterate_job(job_id, 'review', 'opus', 'Review do opus')
+        job = get_job(job_id)
+        assert job['iteration'] == initial_iter + 2
+        assert job['status'] == 'in_review'
+        assert len(job['history']) == 2
+
+        # Cleanup
+        delete_job(job_id)
+
+    def test_iterate_job_cannot_iterate_terminal_state(self):
+        """Testa que nao pode iterar job em estado terminal."""
+        data = {"prompt": "Teste estado terminal"}
+        job_id = create_job(ttl=3600, data=data)
+
+        job_initial = get_job(job_id)
+        initial_iter = job_initial['iteration']
+
+        # Tenta mudar para completed primeiro
+        # pending pode ir para executing, in_review, ou failed
+        # Então vamos para executing primeiro, depois failed (terminal)
+        update_job_status(job_id, 'executing')
+        update_job_status(job_id, 'failed')  # Terminal
+
+        # Tenta iterar (deve falhar)
+        success = iterate_job(job_id, 'execution', 'haiku', 'Nao deve funcionar')
+        assert success is False
+
+        # Verifica que job nao foi atualizado
+        job = get_job(job_id)
+        assert job['iteration'] == initial_iter  # Nao deve ter mudado
+        assert len(job['history']) == 0
+
+        # Cleanup
+        delete_job(job_id)
+
+    def test_iterate_job_invalid_iteration_type(self):
+        """Testa validacao de iteration_type."""
+        data = {"prompt": "Teste"}
+        job_id = create_job(ttl=3600, data=data)
+
+        with pytest.raises(ValueError, match="iteration_type"):
+            iterate_job(job_id, 'invalid_type', 'haiku', 'Result')
+
+        # Cleanup
+        delete_job(job_id)
+
+    def test_iterate_job_invalid_agent(self):
+        """Testa validacao de agent."""
+        data = {"prompt": "Teste"}
+        job_id = create_job(ttl=3600, data=data)
+
+        with pytest.raises(ValueError, match="agent"):
+            iterate_job(job_id, 'execution', 'invalid_agent', 'Result')
+
+        # Cleanup
+        delete_job(job_id)
+
+
+class TestCheckCliToolsSecurityPathTraversal(unittest.TestCase):
+    """Testes de path traversal em check_cli_tools - SECURITY FIX #3."""
+
+    def setUp(self):
+        """Limpa banco antes de cada teste (se necessario)."""
+        # check_cli_tools nao usa banco, mas mantemos setUp por consistencia
+        pass
+
+    def test_check_cli_tools_valid_names(self):
+        """Testa que nomes validos de ferramentas funcionam."""
+        # Nomes validos nao devem gerar erro
+        result = check_cli_tools(['gdrive', 'elevenlabs-cli', 'my_tool_123'])
+
+        # Tudo deve ser False (nao existem) mas nao deve haver erro
+        assert isinstance(result, dict)
+        assert 'gdrive' in result
+        assert 'elevenlabs-cli' in result
+        assert 'my_tool_123' in result
+
+    def test_check_cli_tools_path_traversal_blocked(self):
+        """Testa que tentativas de path traversal sao bloqueadas."""
+        malicious_names = [
+            '../../../etc/passwd',
+            '..\\..\\..\\windows\\system32',
+            'tool/../../../etc/passwd',
+            'tool\\..\\..',
+            '/etc/passwd',
+            '\\windows\\system32',
+        ]
+
+        result = check_cli_tools(malicious_names)
+
+        # Todos devem retornar False (bloqueados)
+        for name in malicious_names:
+            assert result[name] is False
+
+    def test_check_cli_tools_null_bytes_blocked(self):
+        """Testa que null bytes sao bloqueados."""
+        malicious_names = [
+            'tool\x00.exe',
+            'tool\x00',
+        ]
+
+        result = check_cli_tools(malicious_names)
+
+        # Todos devem retornar False
+        for name in malicious_names:
+            assert result[name] is False
+
+    def test_check_cli_tools_empty_name_blocked(self):
+        """Testa que nomes vazios sao bloqueados."""
+        result = check_cli_tools([''])
+
+        # Deve retornar False para nome vazio
+        assert result[''] is False
+
+    def test_check_cli_tools_double_dots_blocked(self):
+        """Testa que '..' em nomes e bloqueado."""
+        malicious_names = [
+            '..',
+            'tool..name',
+            '..tool',
+            'tool..',
+        ]
+
+        result = check_cli_tools(malicious_names)
+
+        # Todos devem retornar False
+        for name in malicious_names:
+            assert result[name] is False
 
 
 if __name__ == "__main__":

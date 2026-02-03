@@ -347,7 +347,9 @@ def load_rebuild_state() -> Dict:
 def save_rebuild_state(state: Dict):
     """Salva estado do rebuild."""
     ensure_dirs()
+    logger.info(f"Salvando rebuild_state em: {REBUILD_STATE_FILE}")
     REBUILD_STATE_FILE.write_text(json.dumps(state, indent=2))
+    logger.info(f"✓ rebuild_state salvo com sucesso")
 
 
 def compute_documents_hash(doc_index: Dict) -> str:
@@ -520,13 +522,19 @@ def save_faiss_index(index, metadata):
 
     try:
         # Escreve arquivos com sucesso antes de atualizar cache global
+        logger.info(f"Salvando índice FAISS em: {FAISS_INDEX_FILE}")
         faiss.write_index(index, str(FAISS_INDEX_FILE))
+        logger.info(f"✓ Índice salvo com sucesso ({index.ntotal} vetores)")
+
+        logger.info(f"Salvando metadata em: {FAISS_META_FILE}")
         with open(FAISS_META_FILE, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, ensure_ascii=False)
+        logger.info(f"✓ Metadata salvo com sucesso")
 
         # APENAS após sucesso de ambas as escritas, atualiza globais
         _faiss_index = index
         _faiss_metadata = metadata
+        logger.info("✓ Cache global atualizado com sucesso")
 
     except (IOError, OSError, Exception) as e:
         logger.error(f"Erro ao salvar índice FAISS: {e}")
@@ -583,6 +591,8 @@ def build_faiss_index(force: bool = False, log_rebuild: bool = False) -> Dict:
 
         if not source_path.exists():
             skipped_files += 1
+            if log_rebuild and skipped_files <= 5:  # Log dos primeiros 5 skipped
+                logger.warning(f"Arquivo não encontrado (será ignorado): {source}")
             continue
 
         try:
@@ -607,7 +617,9 @@ def build_faiss_index(force: bool = False, log_rebuild: bool = False) -> Dict:
             continue
 
     if not texts:
-        return {"status": "error", "message": "Nenhum texto para indexar"}
+        msg = f"Nenhum texto para indexar (verificou {len(docs_list)} docs, {processed_files} processados, {skipped_files} não encontrados)"
+        logger.error(msg)
+        return {"status": "error", "message": msg}
 
     print(f"  Gerando embeddings para {len(texts)} chunks...")
     embeddings = model.encode(texts, show_progress_bar=True)
@@ -642,10 +654,13 @@ def build_faiss_index(force: bool = False, log_rebuild: bool = False) -> Dict:
 
     if log_rebuild:
         logger.info(f"Documentos processados: {processed_files}")
-        logger.info(f"Documentos ignorados: {skipped_files}")
+        logger.info(f"Documentos ignorados (não encontrados): {skipped_files}")
         logger.info(f"Chunks gerados: {index.ntotal}")
         logger.info(f"Tempo de rebuild: {elapsed_time:.2f}s")
         logger.info(f"Hash dos documentos: {current_hash}")
+        logger.info(f"Arquivo índice: {FAISS_INDEX_FILE}")
+        logger.info(f"Arquivo metadata: {FAISS_META_FILE}")
+        logger.info(f"Arquivo rebuild_state: {REBUILD_STATE_FILE}")
         logger.info("REBUILD CONCLUÍDO COM SUCESSO")
         logger.info("=" * 50)
 

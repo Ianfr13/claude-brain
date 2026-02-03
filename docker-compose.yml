@@ -1,10 +1,114 @@
 version: '3.8'
 
 services:
+  # Neo4j Graph Database
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: claude-brain-neo4j
+    ports:
+      - "127.0.0.1:7474:7474"  # Browser UI
+      - "127.0.0.1:7687:7687"  # Bolt protocol
+    environment:
+      # Authentication
+      NEO4J_AUTH: neo4j/brainpassword
+
+      # Memory configuration (tune for your system)
+      NEO4J_server_memory_heap_initial__size: 2G
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 1G
+
+      # Plugins
+      NEO4J_PLUGINS: '["apoc", "gds"]'
+
+      # Settings
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*
+      NEO4J_dbms_transaction_bookmark_state_size: 100000
+      NEO4J_server_bolt_advertised__address: localhost:7687
+
+    volumes:
+      # Data persistence
+      - neo4j-data:/var/lib/neo4j/data
+      # Logs for debugging
+      - neo4j-logs:/var/log/neo4j
+      # Plugins configuration
+      - ./config/neo4j-plugins.txt:/var/lib/neo4j/plugins.txt
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Healthcheck
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "brainpassword", "RETURN 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: claude-brain-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --appendonly yes --requirepass brainredis
+    volumes:
+      # Data persistence
+      - redis-data:/data
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Healthcheck
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
   # Claude Brain API Server
   brain-api:
     build: .
     container_name: claude-brain-api
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
@@ -20,6 +124,16 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: 8765
       LOG_LEVEL: INFO
+
+      # Neo4j configuration
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: brainpassword
+
+      # Redis configuration
+      REDIS_URL: redis://:brainredis@redis:6379/0
+      CACHE_ENABLED: "true"
+      CACHE_TTL_SECONDS: 86400
 
       # Model settings (offline mode)
       HF_HUB_OFFLINE: "1"
@@ -59,19 +173,13 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Optional: Redis for cache (can be enabled later)
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: claude-brain-redis
-  #   ports:
-  #     - "127.0.0.1:6379:6379"
-  #   volumes:
-  #     - redis-data:/data
-  #   restart: always
-
-# volumes:
-  # redis-data:
-  #   driver: local
+volumes:
+  neo4j-data:
+    driver: local
+  neo4j-logs:
+    driver: local
+  redis-data:
+    driver: local
 
 networks:
   default:

@@ -75,15 +75,10 @@ class DecompositionResult:
 
 # ============ CONSTANTS ============
 
-OPENROUTER_API_URL = "https://openrouter.io/api/v1/chat/completions"
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODELS = [
-    "meta-llama/llama-3.1-8b-instruct",  # fast
+    "nvidia/nemotron-nano-9b-v2:free",  # fast
     "openrouter/auto",  # auto-routing
-]
-
-ANTHROPIC_MODELS = [
-    "claude-3-5-haiku-20241022",  # preferred (supports 200k context)
-    "claude-3-haiku-20240307",     # fallback
 ]
 
 # ============ INPUT VALIDATION ============
@@ -267,44 +262,36 @@ class OpenRouterDecomposer:
             return None
 
 
-# ============ ANTHROPIC FALLBACK ============
+# ============ GEMINI FALLBACK ============
 
-class AnthropicDecomposer:
-    """Fallback para Claude Haiku via Anthropic API"""
+class GeminiDecomposer:
+    """Fallback para Google Gemini via OpenRouter API"""
 
     def __init__(self):
-        self.api_key = os.environ.get("ANTHROPIC_API_KEY")
-        self.models = ANTHROPIC_MODELS
+        self.api_key = os.environ.get("OPENROUTER_API_KEY")
+        self.model = "google/gemini-2.5-flash-lite-preview-09-2025"
+        self.base_url = OPENROUTER_API_URL
 
         if not self.api_key:
-            logger.warning("ANTHROPIC_API_KEY não configurada")
+            logger.warning("OPENROUTER_API_KEY não configurada")
             self.available = False
         else:
             self.available = True
-            logger.info("Anthropic configurada com sucesso (fallback)")
-
-        # Tenta importar cliente Anthropic
-        try:
-            import anthropic
-            self.client = anthropic.Anthropic(api_key=self.api_key)
-            logger.info("Cliente Anthropic importado com sucesso")
-        except ImportError:
-            logger.warning("Pacote anthropic não instalado - fallback indisponível")
-            self.available = False
+            logger.info("Gemini configurada com sucesso (fallback)")
 
     def decompose(self, query: str, timeout: int = 30) -> Optional[Dict[str, Any]]:
         """
-        Decomposição via Anthropic (Claude Haiku)
+        Decomposição via Google Gemini (OpenRouter)
 
         Args:
             query: Query a decompor
-            timeout: Timeout em segundos (parcialmente ignorado por cliente Anthropic)
+            timeout: Timeout em segundos
 
         Returns:
             Dict com sub_queries ou None se erro
         """
         if not self.available:
-            logger.warning("Anthropic não disponível - pulando")
+            logger.warning("Gemini não disponível - pulando")
             return None
 
         # Valida e sanitiza query
@@ -316,25 +303,47 @@ class AnthropicDecomposer:
 
         prompt = DECOMPOSITION_PROMPT.format(query=query)
 
-        try:
-            logger.info(f"Enviando para Anthropic: modelo={self.models[0]}")
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://claude-brain.local",
+            "X-Title": "Claude Brain Query Decomposer",
+        }
 
-            message = self.client.messages.create(
-                model=self.models[0],
-                max_tokens=1000,
-                temperature=0.3,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.3,
+            "max_tokens": 1000,
+        }
+
+        try:
+            logger.info(f"Enviando para Gemini: modelo={self.model}")
+            logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
+
+            response = requests.post(
+                self.base_url,
+                json=payload,
+                headers=headers,
+                timeout=timeout
             )
 
-            logger.info("Anthropic respondeu com sucesso")
+            response.raise_for_status()
+            result = response.json()
 
-            # Extrai conteúdo
-            content = message.content[0].text if message.content else ""
+            logger.info(f"Gemini respondeu com status 200")
+
+            # Extrai conteúdo da resposta
+            if "choices" not in result or not result["choices"]:
+                logger.error(f"Resposta inválida de Gemini: {result}")
+                return None
+
+            content = result["choices"][0]["message"]["content"]
             logger.debug(f"Conteúdo bruto: {content}")
 
             # Parse JSON
@@ -343,8 +352,8 @@ class AnthropicDecomposer:
                 logger.info(f"Decomposição bem-sucedida: {len(decomposition.get('sub_queries', []))} sub-queries")
                 return decomposition
             except json.JSONDecodeError as e:
-                logger.error(f"JSON inválido de Anthropic: {e}")
-                logger.debug(f"Tentando extrair JSON...")
+                logger.error(f"JSON inválido de Gemini: {e}")
+                logger.debug(f"Tentando extrair JSON do conteúdo...")
                 import re
                 match = re.search(r'\{.*\}', content, re.DOTALL)
                 if match:
@@ -357,8 +366,18 @@ class AnthropicDecomposer:
                         return None
                 return None
 
+        except requests.Timeout:
+            logger.error(f"Gemini timeout após {timeout}s")
+            return None
+        except requests.ConnectionError as e:
+            logger.error(f"Erro de conexão com Gemini: {e}")
+            return None
+        except requests.HTTPError as e:
+            logger.error(f"HTTP error de Gemini: {e}")
+            logger.debug(f"Response: {e.response.text}")
+            return None
         except Exception as e:
-            logger.error(f"Erro ao chamar Anthropic: {e}")
+            logger.error(f"Erro inesperado ao chamar Gemini: {e}")
             return None
 
 
@@ -369,13 +388,13 @@ class QueryDecomposer:
 
     def __init__(self):
         self.openrouter = OpenRouterDecomposer()
-        self.anthropic = AnthropicDecomposer()
+        self.gemini = GeminiDecomposer()
 
         # Log disponibilidade
         logger.info(f"OpenRouter disponível: {self.openrouter.available}")
-        logger.info(f"Anthropic disponível: {self.anthropic.available}")
+        logger.info(f"Gemini disponível: {self.gemini.available}")
 
-        if not self.openrouter.available and not self.anthropic.available:
+        if not self.openrouter.available and not self.gemini.available:
             logger.warning("NENHUM PROVIDER DISPONÍVEL!")
 
     def decompose(self, query: str) -> DecompositionResult:
@@ -430,21 +449,21 @@ class QueryDecomposer:
                 return result
             logger.warning("OpenRouter falhou, tentando fallback...")
 
-        # Tentativa 2: Anthropic (fallback)
-        if self.anthropic.available:
-            logger.info("Tentativa 2: Anthropic (fallback)")
-            decomposition = self.anthropic.decompose(query)
+        # Tentativa 2: Gemini (fallback)
+        if self.gemini.available:
+            logger.info("Tentativa 2: Gemini (fallback)")
+            decomposition = self.gemini.decompose(query)
             if decomposition:
                 result = self._build_result(
                     query=query,
                     decomposition=decomposition,
-                    provider="anthropic",
-                    model=self.anthropic.models[0],
+                    provider="gemini",
+                    model=self.gemini.model,
                     start_time=start_time
                 )
-                logger.info(f"Sucesso com Anthropic (fallback)")
+                logger.info(f"Sucesso com Gemini (fallback)")
                 return result
-            logger.warning("Anthropic também falhou")
+            logger.warning("Gemini também falhou")
 
         # Ambos falharam
         logger.error("AMBOS os providers falharam!")

@@ -10,7 +10,7 @@ services:
       - "127.0.0.1:7687:7687"  # Bolt protocol
     environment:
       # Authentication
-      NEO4J_AUTH: neo4j/brainpassword
+      NEO4J_AUTH: ${NEO4J_USER}/${NEO4J_PASSWORD}
 
       # Memory configuration (tune for your system)
       NEO4J_server_memory_heap_initial__size: 2G
@@ -18,11 +18,10 @@ services:
       NEO4J_server_memory_pagecache_size: 1G
 
       # Plugins
-      NEO4J_PLUGINS: '["apoc", "gds"]'
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
 
       # Settings
-      NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*
-      NEO4J_dbms_transaction_bookmark_state_size: 100000
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*,algo.*
       NEO4J_server_bolt_advertised__address: localhost:7687
 
     volumes:
@@ -48,7 +47,7 @@ services:
 
     # Healthcheck
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "brainpassword", "RETURN 1"]
+      test: ["CMD", "cypher-shell", "-u", "${NEO4J_USER}", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -67,7 +66,7 @@ services:
     container_name: claude-brain-redis
     ports:
       - "127.0.0.1:6379:6379"
-    command: redis-server --appendonly yes --requirepass brainredis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       # Data persistence
       - redis-data:/data
@@ -104,18 +103,22 @@ services:
   brain-api:
     build: .
     container_name: claude-brain-api
+    user: "0:0"
+    entrypoint: /docker-entrypoint.sh
     depends_on:
       neo4j:
         condition: service_healthy
       redis:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8765:8765"
+      - "127.0.0.1:8766:8765"
     volumes:
-      # Mount data directories for persistence
-      - ./memory:/app/memory
-      - ./rag:/app/rag
-      - ./logs:/app/logs
+      # Entrypoint script
+      - ./docker-entrypoint.sh:/docker-entrypoint.sh:ro
+      # Use named volumes only for app directories
+      - brain-memory:/app/memory
+      - brain-rag:/app/rag
+      - brain-logs:/app/logs
     environment:
       # Configuration
       BRAIN_DIR: /app
@@ -127,11 +130,11 @@ services:
 
       # Neo4j configuration
       NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: brainpassword
+      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
 
       # Redis configuration
-      REDIS_URL: redis://:brainredis@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CACHE_ENABLED: "true"
       CACHE_TTL_SECONDS: 86400
 
@@ -179,6 +182,12 @@ volumes:
   neo4j-logs:
     driver: local
   redis-data:
+    driver: local
+  brain-memory:
+    driver: local
+  brain-rag:
+    driver: local
+  brain-logs:
     driver: local
 
 networks:

@@ -15,6 +15,7 @@ Relacionamentos:
 - __init__.py -> re-exporta init_db para inicializacao externa
 """
 
+import os
 import sqlite3
 import json
 import hashlib
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # ============ CONSTANTES ============
 
-DB_PATH = Path("/root/claude-brain/memory/brain.db")
+DB_PATH = Path(os.getenv("DB_PATH", "/root/claude-brain/claude_brain.db"))
 
 # Tabelas permitidas para queries dinamicas (protecao contra SQL Injection)
 ALLOWED_TABLES = {'memories', 'decisions', 'learnings'}
